@@ -36,6 +36,13 @@ var SheetMusic = (function () {
 	var SHARP_ORDER = [3, 0, 4, 1, 5, 2, 6];   // F C G D A E B
 	var FLAT_ORDER  = [6, 2, 5, 1, 4, 0, 3];   // B E A D G C F
 
+	// Where each key-signature accidental sits, in half-steps above the bottom
+	// staff line. Fixed by convention, not derived from the pitch.
+	var SIG_POS = {
+		treble: {sharp: [8, 5, 9, 6, 3, 7, 4], flat: [4, 7, 3, 6, 2, 5, 1]},
+		bass:   {sharp: [6, 3, 7, 4, 1, 5, 2], flat: [2, 5, 1, 4, 0, 3, -1]},
+	};
+
 	function spell(midi, useSharps) {
 		var pc = ((midi % 12) + 12) % 12;
 		var entry = (useSharps ? SHARP_SPELL : FLAT_SPELL)[pc];
@@ -98,9 +105,10 @@ var SheetMusic = (function () {
 	}
 
 	// ---- the renderer --------------------------------------------------------
-	function renderChannel(song, channelIndex, partIndex) {
+	// instrument: {name, semitones} or null to leave the part at concert pitch.
+	function renderChannel(song, channelIndex, instrument) {
 		var notes = collectNotes(song, channelIndex);
-		var part = parts[partIndex] || parts[0];
+		var part = instrument || {name: "Concert pitch", semitones: 0};
 		var basePitch = beepbox.Config.keys[song.key].basePitch;
 		var partsPerBeat = beepbox.Config.partsPerBeat;
 		var partsPerBar = song.beatsPerBar * partsPerBeat;
@@ -139,7 +147,7 @@ var SheetMusic = (function () {
 		// geometry
 		var GAP = 7;                          // half a staff space
 		var STAFF = GAP * 8;                  // four spaces
-		var LEFT = 56;                        // clef + key signature
+		var LEFT = 34 + Math.max(1, sig.count) * 8 + 12;   // clef + key signature
 		var BAR_W = Math.max(90, 34 * song.beatsPerBar);
 		var PER_LINE = Math.max(1, Math.min(4, Math.floor(760 / BAR_W)));
 		var lines = Math.ceil(song.barCount / PER_LINE);
@@ -164,16 +172,11 @@ var SheetMusic = (function () {
 			glyph(svg, 12, treble ? top + GAP * 6.2 : top + GAP * 3.4,
 				treble ? "\u{1D11E}" : "\u{1D122}", treble ? 46 : 38);
 
-			// key signature
-			var order = sig.type >= 0 ? SHARP_ORDER : FLAT_ORDER;
+			// key signature, at the conventional staff positions
+			var posList = SIG_POS[treble ? "treble" : "bass"][sig.type >= 0 ? "sharp" : "flat"];
 			for (var k = 0; k < sig.count; k++) {
-				var letter = order[k];
-				// place it in the octave that sits on the staff
-				var d = bottomDiatonic + 2;
-				while ((d % 7) !== letter) d++;
-				if (d - bottomDiatonic > 8) d -= 7;
-				var ky = top + STAFF - (d - bottomDiatonic) * GAP;
-				glyph(svg, 34 + k * 7, ky + 5, sig.type >= 0 ? "♯" : "♭", 15);
+				var ky = top + STAFF - posList[k] * GAP;
+				glyph(svg, 30 + k * 8, ky + 5, sig.type >= 0 ? "♯" : "♭", 15);
 			}
 
 			// barlines
