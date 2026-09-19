@@ -22,10 +22,10 @@ export class ColorConfig {
 				--primary-text: white;
 				--secondary-text: #999;
 				--inverted-text: black;
-				--text-selection: rgba(119,68,255,0.99);
+				--text-selection: rgba(255,68,82,0.99);
 				--box-selection-fill: rgba(255,255,255,0.2);
-				--loop-accent: #74f;
-				--link-accent: #98f;
+				--loop-accent: #ff4452;
+				--link-accent: #ff88a1;
 				--ui-widget-background: #444;
 				--ui-widget-focus: #777;
 				--pitch-background: #444;
@@ -107,8 +107,8 @@ export class ColorConfig {
 				--inverted-text: white;
 				--text-selection: rgba(200,170,255,0.99);
 				--box-selection-fill: rgba(0,0,0,0.1);
-				--loop-accent: #98f;
-				--link-accent: #74f;
+				--loop-accent: #ff88a1;
+				--link-accent: #ff4452;
 				--ui-widget-background: #ececec;
 				--ui-widget-focus: #eee;
 				--pitch-background: #ececec;

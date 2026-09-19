@@ -144,18 +144,17 @@ export class LoopEditor {
 		return Math.floor((this._mouseY - this._loopHeight) / this._repeatRowHeight);
 	}
 
-	// Prefers the loop drawn on the row the pointer is actually over, so a
-	// nested loop and the one around it stay independently clickable where they
-	// cover the same bar. Falls back to the innermost loop at that bar.
+	// Only the loop actually drawn on this row counts. Falling back to the
+	// nearest enclosing loop meant that dragging across the empty row beneath
+	// one grabbed it instead of starting a nested loop inside it, which made
+	// nesting impossible to create by hand.
 	private _findSectionIndexAtBar(bar: number, row: number): number {
 		const sections: RepeatSection[] = this._doc.song.repeatSections;
-		let best: number = -1;
 		for (let i: number = 0; i < sections.length; i++) {
 			if (!sections[i].containsBar(bar)) continue;
 			if (getRepeatSectionDepth(sections, i) == row) return i;
-			if (best == -1 || sections[i].length < sections[best].length) best = i;
 		}
-		return best;
+		return -1;
 	}
 
 	// Which part of a loop the pointer grabbed. The outer third of a short loop
@@ -543,9 +542,10 @@ export class LoopEditor {
 		for (let i: number = 0; i < sections.length; i++) {
 			rows = Math.max(rows, getRepeatSectionDepth(sections, i) + 1);
 		}
-		// Always keep one empty row available, otherwise there is nowhere to
-		// drag out the first repeat loop.
-		const height: number = this._loopHeight + Math.max(1, rows) * this._repeatRowHeight;
+		// Always keep one spare row below the deepest loop. Sizing to just the
+		// rows in use left nowhere to drag, so a nested loop could never be
+		// started once the first loop existed.
+		const height: number = this._loopHeight + (rows + 1) * this._repeatRowHeight;
 		if (height == this._editorHeight) return;
 		this._editorHeight = height;
 		this._svg.setAttribute("height", height + "");

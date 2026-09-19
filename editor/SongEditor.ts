@@ -831,8 +831,9 @@ export class SongEditor {
 	// Slots are pitch channels; the Edit menu still covers noise channels and
 	// inserting a slot anywhere other than the end.
 	private _whenSheetMusicPressed = (): void => {
-		// TODO: transpose the song for a chosen part and render it as notation.
-		// Wired up but deliberately inert until that exists.
+		// The song travels in the URL, so the transpose page can read it straight
+		// from the hash without any shared state.
+		window.location.href = "transpose.html#" + this.doc.song.toBase64String();
 	}
 	
 	private _whenAddInstrumentSlotPressed = (): void => {
