@@ -123,6 +123,37 @@ npm install
 npm run build
 ```
 
+## Running it
+
+**The quickest way — one file, no server.** `website/beepbox_offline.html` is the
+whole editor inlined into a single page. Open it directly in any browser, from a
+USB stick or a downloads folder, with no install and no network. It is committed
+here, so you can download it from this repo and just open it. `npm run build`
+regenerates it, so expect it to show up in your diffs after a build.
+
+**The normal way.** `website/index.html` loads the editor from a separate script,
+so opening it straight off disk will not work — it needs to be served:
+
+```
+cd website
+python3 -m http.server 8731
+```
+
+then visit <http://localhost:8731/index.html>.
+
+A song lives entirely in the URL after the `#`, so a song is just a long link.
+Those links break if a newline sneaks in when copying, which shows up as
+"the song data appears to have been corrupted".
+
+## A note if you clone this into iCloud Drive
+
+`npm install` rewrites `node_modules` as a real directory every time, and iCloud
+will happily sync all ~12,000 files in it and may later evict them, which breaks
+builds with errors that look unrelated. `scripts/nosync-deps.cjs` runs before
+each build and parks the dependencies in `node_modules.nosync`, which iCloud
+ignores. It does nothing outside iCloud Drive, so a clone anywhere else behaves
+normally.
+
 ## Code
 
 The layout is unchanged from upstream.
