@@ -2255,6 +2255,18 @@ export class ChangeMoveNotesSideways extends ChangeGroup {
 	}
 }
 
+export class ChangeBeatUnit extends Change {
+	// Notation only: which note value gets the beat. Playback is unaffected.
+	constructor(doc: SongDocument, newValue: number) {
+		super();
+		if (doc.song.beatUnit != newValue) {
+			doc.song.beatUnit = newValue;
+			doc.notifier.changed();
+			this._didSomething();
+		}
+	}
+}
+
 export class ChangeBeatsPerBar extends ChangeGroup {
 	constructor(doc: SongDocument, newValue: number, strategy: string) {
 		super();

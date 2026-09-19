@@ -36,7 +36,7 @@ import {ImportPrompt} from "./ImportPrompt.js";
 import {SongRecoveryPrompt} from "./SongRecoveryPrompt.js";
 import {RecordingSetupPrompt} from "./RecordingSetupPrompt.js";
 import {Change} from "./Change.js";
-import {ChangeTempo, ChangeChorus, ChangeEchoDelay, ChangeEchoSustain, ChangeReverb, ChangeVolume, ChangePan, ChangePatternSelection, ChangeSupersawDynamism, ChangeSupersawSpread, ChangeSupersawShape, ChangePulseWidth, ChangeFeedbackAmplitude, ChangeOperatorAmplitude, ChangeOperatorFrequency, ChangeDrumsetEnvelope, ChangePasteInstrument, ChangePreset, pickRandomPresetValue, ChangeRandomGeneratedInstrument, ChangeScale, ChangeDetectKey, ChangeKey, ChangeRhythm, ChangeFeedbackType, ChangeAlgorithm, ChangeCustomizeInstrument, ChangeChipWave, ChangeNoiseWave, ChangeTransition, ChangeToggleEffects, ChangeVibrato, ChangeUnison, ChangeChord, ChangeSong, ChangePitchShift, ChangeDetune, ChangeDistortion, ChangeStringSustain, ChangeBitcrusherFreq, ChangeBitcrusherQuantization, ChangeAddEnvelope, ChangeAddChannelInstrument, ChangeRemoveChannelInstrument, ChangeBarCount, ChangeDeleteBars, ChangeAddChannel, ChangeRemoveChannel} from "./changes.js";
+import {ChangeTempo, ChangeChorus, ChangeEchoDelay, ChangeEchoSustain, ChangeReverb, ChangeVolume, ChangePan, ChangePatternSelection, ChangeSupersawDynamism, ChangeSupersawSpread, ChangeSupersawShape, ChangePulseWidth, ChangeFeedbackAmplitude, ChangeOperatorAmplitude, ChangeOperatorFrequency, ChangeDrumsetEnvelope, ChangePasteInstrument, ChangePreset, pickRandomPresetValue, ChangeRandomGeneratedInstrument, ChangeScale, ChangeDetectKey, ChangeKey, ChangeRhythm, ChangeFeedbackType, ChangeAlgorithm, ChangeCustomizeInstrument, ChangeChipWave, ChangeNoiseWave, ChangeTransition, ChangeToggleEffects, ChangeVibrato, ChangeUnison, ChangeChord, ChangeSong, ChangePitchShift, ChangeDetune, ChangeDistortion, ChangeStringSustain, ChangeBitcrusherFreq, ChangeBitcrusherQuantization, ChangeAddEnvelope, ChangeAddChannelInstrument, ChangeRemoveChannelInstrument, ChangeBarCount, ChangeDeleteBars, ChangeAddChannel, ChangeRemoveChannel, ChangeBeatUnit, ChangeBeatsPerBar} from "./changes.js";
 
 const {a, button, div, input, select, span, optgroup, option} = HTML;
 
@@ -399,6 +399,13 @@ export class SongEditor {
 		this._patternEditor.container,
 		this._patternEditorNext.container,
 	);
+	private readonly _beatsStepper: HTMLInputElement = input({style: "width: 3em; margin-left: 0;", type: "number", step: "1"});
+	private readonly _beatUnitSelect: HTMLSelectElement = buildOptions(select(), Config.beatUnits.map(u => String(u)));
+	private readonly _timeSignatureRow: HTMLDivElement = div({class: "selectRow"},
+		span({class: "tip", onclick: ()=>this._openPrompt("beatsPerBar")}, "Time:"),
+		span({style: "display: flex; align-items: center; gap: 3px;"},
+			this._beatsStepper, span({}, "/"), div({class: "selectContainer", style: "width: 3.2em;"}, this._beatUnitSelect)),
+	);
 	private readonly _partSelect: HTMLSelectElement = buildOptions(select(), EditorConfig.transposingParts.map(p => p.name));
 	private readonly _concertKeyLabel: HTMLDivElement = div({class: "concertKeyLabel"});
 	private readonly _patternArea: HTMLDivElement = div({class: "pattern-area"},
@@ -469,6 +476,7 @@ export class SongEditor {
 				span({class: "tip", onclick: ()=>this._openPrompt("key")}, "Key:"),
 				div({class: "selectContainer"}, this._keySelect),
 			),
+			this._timeSignatureRow,
 			div({class: "selectRow"},
 				span({class: "tip", onclick: ()=>this._openPrompt("key")}, "My part:"),
 				div({class: "selectContainer"}, this._partSelect),
@@ -616,6 +624,8 @@ export class SongEditor {
 		this._tempoStepper.addEventListener("change", this._whenSetTempo);
 		this._scaleSelect.addEventListener("change", this._whenSetScale);
 		this._keySelect.addEventListener("change", this._whenSetKey);
+		this._beatUnitSelect.addEventListener("change", this._whenSetBeatUnit);
+		this._beatsStepper.addEventListener("change", this._whenSetBeatsPerBar);
 		this._partSelect.addEventListener("change", this._whenSetPart);
 		this._rhythmSelect.addEventListener("change", this._whenSetRhythm);
 		this._pitchedPresetSelect.addEventListener("change", this._whenSetPitchedPreset);
@@ -861,6 +871,10 @@ export class SongEditor {
 		this.doc.trackVisibleBars = Math.floor((this._trackVisibleArea.clientWidth - (prefs.enableChannelMuting ? 32 : 0)) / this.doc.getBarWidth());
 		this._concertKeyLabel.textContent = "CONCERT " + Config.keys[this.doc.song.key].name;
 		setSelectedValue(this._partSelect, this.doc.prefs.transposingPart);
+		this._beatsStepper.value = String(this.doc.song.beatsPerBar);
+		this._beatsStepper.min = String(Config.beatsPerBarMin);
+		this._beatsStepper.max = String(Config.beatsPerBarMax);
+		setSelectedValue(this._beatUnitSelect, Config.beatUnits.indexOf(this.doc.song.beatUnit));
 		this._measureButtons.style.width = (EditorConfig.addMeasureBarSpan * this.doc.getBarWidth() - 2) + "px";
 		this._measureButtons.style.height = this._trackEditor.container.style.height;
 		this._removeMeasureButton.disabled = this.doc.song.barCount <= Config.barCountMin;
@@ -1883,6 +1897,18 @@ export class SongEditor {
 		this.doc.prefs.transposingPart = this._partSelect.selectedIndex;
 		this.doc.prefs.save();
 		this.doc.notifier.changed();
+	}
+	
+	private _whenSetBeatUnit = (): void => {
+		this.doc.record(new ChangeBeatUnit(this.doc, Config.beatUnits[this._beatUnitSelect.selectedIndex]));
+	}
+	
+	private _whenSetBeatsPerBar = (): void => {
+		const beats: number = Math.max(Config.beatsPerBarMin,
+			Math.min(Config.beatsPerBarMax, Math.round(+this._beatsStepper.value) || this.doc.song.beatsPerBar));
+		// "splice" keeps the notes where they are and trims anything past the
+		// new bar length, which is the least surprising of the strategies.
+		this.doc.record(new ChangeBeatsPerBar(this.doc, beats, "splice"));
 	}
 	
 	private _whenSetKey = (): void => {

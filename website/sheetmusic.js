@@ -204,8 +204,9 @@ var SheetMusic = (function () {
 			// time signature, once, at the start
 			if (line === 0) {
 				var tsx = LEFT - 11;
+				var unit = song.beatUnit || 4;
 				glyph(svg, tsx, top + GAP * 3.6, String(song.beatsPerBar), 15);
-				glyph(svg, tsx, top + STAFF - 1, "4", 15);
+				glyph(svg, tsx, top + STAFF - 1, String(unit), 15);
 			}
 
 			// barlines

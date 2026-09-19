@@ -264,6 +264,10 @@ export class Config {
 	// them per bar, and the tempo field then reads as steps per minute.
 	public static readonly beatsPerBarMin: number = 2;
 	public static readonly beatsPerBarMax: number = 16;
+	// Time signature denominator. Notation only - it does not change playback,
+	// which is still driven by tempo and beatsPerBar.
+	public static readonly beatUnits: ReadonlyArray<number> = [1, 2, 4, 8, 16];
+	public static readonly beatUnitDefault: number = 4;
 	public static readonly barCountMin: number = 1;
 	public static readonly barCountMax: number = 128;
 	public static readonly instrumentCountMin: number = 1;

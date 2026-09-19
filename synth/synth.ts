@@ -149,7 +149,7 @@ const enum SongTagCode {
 	harmonics           = CharCode.H, // added in BeepBox URL version 7
 	stringSustain       = CharCode.I, // added in BeepBox URL version 9
 	repeatSections      = CharCode.J, // added in Beepbox Reborn for nested repeat sections
-//	                    = CharCode.K,
+	beatUnit            = CharCode.K, // added in Beepbox Reborn for the time signature denominator
 	pan                 = CharCode.L, // added between 8 and 9, DEPRECATED
 //	                    = CharCode.M, // added in JummBox URL version 1(?) for customChipWave
 //	                    = CharCode.N, // added in JummBox URL version 1(?) for songTitle
@@ -1793,6 +1793,7 @@ export class Song {
 	public key: number;
 	public tempo: number;
 	public beatsPerBar: number;
+	public beatUnit: number;
 	public barCount: number;
 	public patternsPerChannel: number;
 	public rhythm: number;
@@ -1848,6 +1849,7 @@ export class Song {
 		this.repeatSections.length = 0;
 		this.tempo = 150;
 		this.beatsPerBar = 8;
+		this.beatUnit = Config.beatUnitDefault;
 		// Only the measures that actually hold a pattern. Upstream padded this
 		// out to 16, which left a row of empty "0" measures on every new song;
 		// the track editor's add-measure button covers that case now.
@@ -1917,6 +1919,11 @@ export class Song {
 		}
 		buffer.push(SongTagCode.tempo, base64IntToCharCode[this.tempo >> 6], base64IntToCharCode[this.tempo & 63]);
 		buffer.push(SongTagCode.beatCount, base64IntToCharCode[this.beatsPerBar - 1]);
+		// Omitted when it is the usual quarter-note beat, so ordinary songs
+		// still produce URLs that upstream BeepBox can read.
+		if (this.beatUnit != Config.beatUnitDefault) {
+			buffer.push(SongTagCode.beatUnit, base64IntToCharCode[Config.beatUnits.indexOf(this.beatUnit)]);
+		}
 		buffer.push(SongTagCode.barCount, base64IntToCharCode[(this.barCount - 1) >> 6], base64IntToCharCode[(this.barCount - 1) & 0x3f]);
 		buffer.push(SongTagCode.patternCount, base64IntToCharCode[(this.patternsPerChannel - 1) >> 6], base64IntToCharCode[(this.patternsPerChannel - 1) & 0x3f]);
 		buffer.push(SongTagCode.rhythm, base64IntToCharCode[this.rhythm]);
@@ -2362,6 +2369,10 @@ export class Song {
 				} else {
 					// Do nothing? This song tag code is deprecated for now.
 				}
+			} break;
+			case SongTagCode.beatUnit: {
+				const index: number = base64CharCodeToInt[compressed.charCodeAt(charIndex++)];
+				this.beatUnit = Config.beatUnits[index] != undefined ? Config.beatUnits[index] : Config.beatUnitDefault;
 			} break;
 			case SongTagCode.beatCount: {
 				if (beforeThree) {
@@ -3333,6 +3344,7 @@ export class Song {
 				"repeatCount": section.repeatCount,
 			})),
 			"beatsPerBar": this.beatsPerBar,
+			"beatUnit": this.beatUnit,
 			"ticksPerBeat": Config.rhythms[this.rhythm].stepsPerBeat,
 			"beatsPerMinute": this.tempo,
 			//"patternCount": this.patternsPerChannel, // derive this from pattern arrays.
@@ -3381,6 +3393,11 @@ export class Song {
 					this.key = index;
 				}
 			}
+		}
+		
+		this.beatUnit = Config.beatUnitDefault;
+		if (jsonObject["beatUnit"] != undefined && Config.beatUnits.indexOf(jsonObject["beatUnit"] | 0) != -1) {
+			this.beatUnit = jsonObject["beatUnit"] | 0;
 		}
 		
 		if (jsonObject["beatsPerMinute"] != undefined) {
