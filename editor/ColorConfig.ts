@@ -194,6 +194,16 @@ export class ColorConfig {
 	public static readonly textSelection: string = "var(--text-selection)";
 	public static readonly boxSelectionFill: string = "var(--box-selection-fill)";
 	public static readonly loopAccent: string = "var(--loop-accent)";
+
+	// Fixed rather than theme variables so repeat sections stay distinguishable
+	// from each other in every theme without each theme having to define them.
+	// Indexed by nesting depth, then wrapped.
+	public static readonly repeatSectionColors: ReadonlyArray<string> = ["#ff4452", "#ffa03d", "#43d67b", "#3db8ff", "#c46bff"];
+
+	public static getRepeatSectionColor(depth: number): string {
+		return ColorConfig.repeatSectionColors[depth % ColorConfig.repeatSectionColors.length];
+	}
+
 	public static readonly linkAccent: string = "var(--link-accent)";
 	public static readonly uiWidgetBackground: string = "var(--ui-widget-background)";
 	public static readonly uiWidgetFocus: string = "var(--ui-widget-focus)";

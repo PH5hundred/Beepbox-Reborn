@@ -1,6 +1,6 @@
 {
-	"name": "BeepBox",
-	"short_name": "BeepBox",
+	"name": "BeepBox: Reborn",
+	"short_name": "Reborn",
 	"description": "BeepBox is a tool for sketching and sharing instrumental melodies.",
 	"scope": "/",
 	"start_url": ".",

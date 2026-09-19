@@ -235,16 +235,16 @@ export class Config {
 	]);
 	public static readonly keys: DictionaryArray<Key> = toNameMap([
 		{name: "C",  isWhiteKey:  true, basePitch: 12}, // C0 has index 12 on the MIDI scale. C7 is 96, and C9 is 120. C10 is barely in the audible range.
-		{name: "C♯", isWhiteKey: false, basePitch: 13},
+		{name: "D♭", isWhiteKey: false, basePitch: 13},
 		{name: "D",  isWhiteKey:  true, basePitch: 14},
-		{name: "D♯", isWhiteKey: false, basePitch: 15},
+		{name: "E♭", isWhiteKey: false, basePitch: 15},
 		{name: "E",  isWhiteKey:  true, basePitch: 16},
 		{name: "F",  isWhiteKey:  true, basePitch: 17},
-		{name: "F♯", isWhiteKey: false, basePitch: 18},
+		{name: "G♭", isWhiteKey: false, basePitch: 18},
 		{name: "G",  isWhiteKey:  true, basePitch: 19},
-		{name: "G♯", isWhiteKey: false, basePitch: 20},
+		{name: "A♭", isWhiteKey: false, basePitch: 20},
 		{name: "A",  isWhiteKey:  true, basePitch: 21},
-		{name: "A♯", isWhiteKey: false, basePitch: 22},
+		{name: "B♭", isWhiteKey: false, basePitch: 22},
 		{name: "B",  isWhiteKey:  true, basePitch: 23},
 	]);
 	public static readonly blackKeyNameParents: ReadonlyArray<number> = [-1, 1, -1, 1, -1, 1, -1, -1, 1, -1, 1, -1];
@@ -260,7 +260,9 @@ export class Config {
 	public static readonly reverbRange: number = 4;
 	public static readonly reverbDelayBufferSize: number = 16384; // TODO: Compute a buffer size based on sample rate.
 	public static readonly reverbDelayBufferMask: number = Config.reverbDelayBufferSize - 1; // TODO: Compute a buffer size based on sample rate.
-	public static readonly beatsPerBarMin: number = 3;
+	// 2 so cut time works: a march counted in half-note beats needs two of
+	// them per bar, and the tempo field then reads as steps per minute.
+	public static readonly beatsPerBarMin: number = 2;
 	public static readonly beatsPerBarMax: number = 16;
 	public static readonly barCountMin: number = 1;
 	public static readonly barCountMax: number = 128;

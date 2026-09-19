@@ -1,7 +1,7 @@
 // Copyright (c) John Nesky and contributing authors, distributed under the MIT license, see accompanying the LICENSE.md file.
 
 import {Config} from "../synth/SynthConfig.js";
-import {isMobile} from "./EditorConfig.js";
+import {isMobile, EditorConfig} from "./EditorConfig.js";
 import {ColorConfig} from "./ColorConfig.js";
 import {Layout} from "./Layout.js";
 import {Pattern, Channel, Song, Synth} from "../synth/synth.js";
@@ -323,7 +323,7 @@ export class SongDocument {
 			this.selection.resetBoxSelection();
 		}
 		
-		this.barScrollPos     = Math.max(0, Math.min(this.song.barCount          - this.trackVisibleBars,     this.barScrollPos));
+		this.barScrollPos     = Math.max(0, Math.min(this.getScrollableBarCount() - this.trackVisibleBars,     this.barScrollPos));
 		this.channelScrollPos = Math.max(0, Math.min(this.song.getChannelCount() - this.trackVisibleChannels, this.channelScrollPos));
 	}
 	
@@ -434,6 +434,12 @@ export class SongDocument {
 	
 	public getMobileLayout(): boolean {
 		return window.innerWidth <= 710;
+	}
+	
+	// The song's measures plus room for the track editor's add-measure button,
+	// which sits past the last measure and must stay reachable by scrolling.
+	public getScrollableBarCount(): number {
+		return this.song.barCount + EditorConfig.addMeasureBarSpan;
 	}
 	
 	public getBarWidth(): number {

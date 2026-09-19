@@ -206,7 +206,7 @@ document.head.appendChild(HTML.style({type: "text/css"}, `
 }
 
 .beepboxEditor .loopEditor {
-	height: 20px;
+	height: 38px;
 	position: sticky;
 	bottom: 0;
 	padding: 5px 0;
@@ -274,11 +274,68 @@ document.head.appendChild(HTML.style({type: "text/css"}, `
 	background-position: center;
 }
 
+.beepboxEditor .concertKeyLabel {
+	flex-shrink: 0;
+	width: 15px;
+	/* Reads bottom-to-top down the left edge of the note editor. */
+	writing-mode: vertical-rl;
+	transform: rotate(180deg);
+	display: flex;
+	align-items: center;
+	justify-content: center;
+	font-size: 11px;
+	letter-spacing: 1px;
+	white-space: nowrap;
+	overflow: hidden;
+	color: ${ColorConfig.secondaryText};
+	background: ${ColorConfig.editorBackground};
+	user-select: none;
+	pointer-events: none;
+}
+
+/* The note names down the piano. Kept here rather than inline so they inherit
+   the editor's font and follow the theme like every other label. */
+.beepboxEditor .piano-label {
+	position: absolute;
+	left: 6px;
+	font-family: inherit;
+	font-size: 11px;
+	font-weight: bold;
+	-webkit-text-stroke-width: 0;
+	pointer-events: none;
+}
+
+.beepboxEditor .piano-part-label {
+	position: absolute;
+	right: 5px;
+	font-family: inherit;
+	font-size: 10px;
+	opacity: 0.75;
+	-webkit-text-stroke-width: 0;
+	pointer-events: none;
+}
+
+/* Out-of-scale keys already carry a dimming overlay, so their labels only
+   need a light touch or they become unreadable on the dark keys. */
+.beepboxEditor .piano-button.disabled .piano-label {
+	opacity: 0.65;
+	font-weight: normal;
+}
+
+.beepboxEditor .piano-button.disabled .piano-part-label {
+	opacity: 0.55;
+}
+
 .beepboxEditor .piano-button {
 	flex: 1;
 	position: relative;
 	display: flex;
 	align-items: center;
+	box-sizing: border-box;
+	/* Flat bars with a little separation, matching the track editor's boxes,
+	   rather than the bevelled 3D keys upstream draws. */
+	margin: 1px 2px;
+	border-radius: 4px;
 }
 .beepboxEditor .piano-button::before {
 	content: "";
@@ -288,26 +345,11 @@ document.head.appendChild(HTML.style({type: "text/css"}, `
 	width: 100%;
 	height: 100%;
 	pointer-events: none;
-	background-image: var(--piano-key-symbol);
-	background-repeat: no-repeat;
-	background-position: center;
-	background-size: 100% 115.38%;
+	/* The bevel and drop shadow are gone; the keys are flat now. */
+	display: none;
 }
-.beepboxEditor .piano-button.disabled::after {
-	content: "";
-	position: absolute;
-	right: 0;
-	top: 0;
-	width: 70%;
-	height: 100%;
-	pointer-events: none;
-	background: ${ColorConfig.editorBackground};
-	-webkit-mask-image: linear-gradient(90deg, transparent 0%, gray 70%, gray 100%);
-	-webkit-mask-repeat: no-repeat;
-	-webkit-mask-position: center;
-	mask-image: linear-gradient(90deg, transparent 0%, gray 70%, gray 100%);
-	mask-repeat: no-repeat;
-	mask-position: center;
+.beepboxEditor .piano-button.disabled {
+	opacity: 0.4;
 }
 
 .beepboxEditor .piano-button.pressed, .beepboxEditor .drum-button.pressed {
@@ -1071,6 +1113,84 @@ document.head.appendChild(HTML.style({type: "text/css"}, `
 
 .beepboxEditor .trackContainer {
 	flex-grow: 1;
+}
+
+.beepboxEditor .trackRow {
+	display: flex;
+	align-items: stretch;
+}
+
+.beepboxEditor .measureButtons {
+	flex-shrink: 0;
+	display: flex;
+	flex-direction: column;
+	gap: 2px;
+	margin-left: 2px;
+	align-self: flex-start;
+}
+
+.beepboxEditor .measureButton {
+	flex: 1;
+	min-height: 0;
+	margin: 0;
+	padding: 0;
+	height: auto;
+	border: 1px dashed ${ColorConfig.uiWidgetBackground};
+	border-radius: 4px;
+	background: transparent;
+	color: ${ColorConfig.secondaryText};
+	font-size: 12px;
+	white-space: nowrap;
+	cursor: pointer;
+}
+
+.beepboxEditor .measureButton:hover:not(:disabled),
+.beepboxEditor .measureButton:focus:not(:disabled) {
+	background: transparent;
+	border-color: ${ColorConfig.linkAccent};
+	color: ${ColorConfig.primaryText};
+}
+
+.beepboxEditor .instrumentSlotBar {
+	display: flex;
+	gap: 4px;
+	padding: 3px 0;
+	/* Sticks to the left so it stays reachable while the track scrolls. */
+	position: sticky;
+	left: 0;
+	width: max-content;
+}
+
+.beepboxEditor .slotButton {
+	margin: 0;
+	padding: 0 8px;
+	height: 18px;
+	border: 1px dashed ${ColorConfig.uiWidgetBackground};
+	border-radius: 4px;
+	background: transparent;
+	color: ${ColorConfig.secondaryText};
+	font-size: 11px;
+	white-space: nowrap;
+	cursor: pointer;
+}
+
+.beepboxEditor .slotButton:hover:not(:disabled),
+.beepboxEditor .slotButton:focus:not(:disabled) {
+	background: transparent;
+	border-color: ${ColorConfig.linkAccent};
+	color: ${ColorConfig.primaryText};
+}
+
+.beepboxEditor .slotButton:disabled {
+	background: transparent;
+	opacity: 0.35;
+	cursor: default;
+}
+
+.beepboxEditor .measureButton:disabled {
+	background: transparent;
+	opacity: 0.35;
+	cursor: default;
 }
 
 .beepboxEditor .trackAndMuteContainer {

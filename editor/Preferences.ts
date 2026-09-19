@@ -12,6 +12,7 @@ export class Preferences {
 	public notesOutsideScale: boolean;
 	public defaultScale: number;
 	public showLetters: boolean;
+	public transposingPart: number;
 	public showChannels: boolean;
 	public showScrollBar: boolean;
 	public alwaysShowSettings: boolean;
@@ -40,8 +41,13 @@ export class Preferences {
 		this.autoFollow = this._loadBoolean("autoFollow", true);
 		this.enableNotePreview = this._loadBoolean("enableNotePreview", true);
 		this.showFifth = this._loadBoolean("showFifth", false);
-		this.notesOutsideScale = this._loadBoolean("notesOutsideScale", false);
-		this.showLetters = this._loadBoolean("showLetters", false);
+		// On by default: a scale should guide writing, not lock out the other
+		// seven notes. Band music is full of chromatic passing tones.
+		this.notesOutsideScale = this._loadBoolean("notesOutsideScale", true);
+		// On by default: the note names down the left edge are how you read the
+		// concert scale you are writing in.
+		this.showLetters = this._loadBoolean("showLetters", true);
+		this.transposingPart = ((<any>window.localStorage.getItem("transposingPart")) >>> 0) || 0;
 		this.showChannels = this._loadBoolean("showChannels", false);
 		this.showScrollBar = this._loadBoolean("showScrollBar", false);
 		this.alwaysShowSettings = this._loadBoolean("alwaysShowSettings", false);
@@ -61,7 +67,9 @@ export class Preferences {
 		this.visibleOctaves = ((<any>window.localStorage.getItem("visibleOctaves")) >>> 0) || Preferences.defaultVisibleOctaves;
 		
 		const defaultScale: Scale | undefined = Config.scales.dictionary[window.localStorage.getItem("defaultScale")!];
-		this.defaultScale = (defaultScale != undefined) ? defaultScale.index : 0;
+		// New songs get the full major scale. SongDocument applies this over
+		// Song.initToDefault, so changing it there alone has no effect.
+		this.defaultScale = (defaultScale != undefined) ? defaultScale.index : Config.scales.dictionary["normal :)"].index;
 		
 		if (window.localStorage.getItem("volume") != null) {
 			this.volume = Math.min(<any>window.localStorage.getItem("volume") >>> 0, 75);
@@ -81,6 +89,7 @@ export class Preferences {
 		window.localStorage.setItem("notesOutsideScale", this.notesOutsideScale ? "true" : "false");
 		window.localStorage.setItem("defaultScale", Config.scales[this.defaultScale].name);
 		window.localStorage.setItem("showLetters", this.showLetters ? "true" : "false");
+		window.localStorage.setItem("transposingPart", String(this.transposingPart));
 		window.localStorage.setItem("showChannels", this.showChannels ? "true" : "false");
 		window.localStorage.setItem("showScrollBar", this.showScrollBar ? "true" : "false");
 		window.localStorage.setItem("alwaysShowSettings", this.alwaysShowSettings ? "true" : "false");

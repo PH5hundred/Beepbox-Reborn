@@ -4,7 +4,8 @@ import {ColorConfig} from "./ColorConfig.js";
 import {SongDocument} from "./SongDocument.js";
 import {HTML, SVG} from "imperative-html/dist/esm/elements-strict.js";
 //import {EasyPointers} from "./EasyPointers.js";
-import {ChangeLoop, ChangeChannelBar} from "./changes.js";
+import {ChangeLoop, ChangeChannelBar, ChangeRepeatSections} from "./changes.js";
+import {RepeatSection, getRepeatSectionDepth, sanitizeRepeatSections} from "../synth/synth.js";
 
 /*
 Unfortunately, I ran into a bug on iOS when I tried to update this component to
@@ -34,16 +35,25 @@ interface Endpoints {
 }
 
 export class LoopEditor {
-	private readonly _editorHeight: number = 20;
+	// The playback loop keeps the original 20px strip; repeat sections get
+	// their own lane underneath so the two never fight for the same pixels.
+	private readonly _loopHeight: number = 20;
+	// Each nesting level gets its own row of loop bars beneath the playback
+	// loop, and the widget only grows as deep as the song actually nests.
+	private readonly _repeatRowHeight: number = 18;
+	private _editorHeight: number = 20;
+	private readonly _maxRepeatCount: number = 8;
 	private readonly _startMode:   number = 0;
 	private readonly _endMode:     number = 1;
 	private readonly _bothMode:    number = 2;
-	
+
 	private readonly _loop: SVGPathElement = SVG.path({fill: "none", stroke: ColorConfig.loopAccent, "stroke-width": 4});
 	private readonly _highlight: SVGPathElement = SVG.path({fill: ColorConfig.hoverPreview, "pointer-events": "none"});
-	
+	private readonly _repeatGroup: SVGGElement = SVG.g();
+
 	private readonly _svg: SVGSVGElement = SVG.svg({style: "position: absolute;", height: this._editorHeight},
 		this._loop,
+		this._repeatGroup,
 		this._highlight,
 	);
 	
@@ -57,6 +67,7 @@ export class LoopEditor {
 	
 	// The following properties are only necessary because of the ios pointer events bug.
 	private _mouseX: number = 0;
+	private _mouseY: number = 0;
 	private _clientStartX: number = 0;
 	private _clientStartY: number = 0;
 	private _startedScrolling: boolean = false;
@@ -64,6 +75,17 @@ export class LoopEditor {
 	private _mouseDown: boolean = false;
 	private _mouseOver: boolean = false;
 	
+	private _draggingRepeat: boolean = false;
+	private _repeatDragStartBar: number = -1;
+	private _repeatDragStartRow: number = 0;
+	private _repeatDragDeleting: boolean = false;
+	private _repeatDragMoved: boolean = false;
+	private _repeatDragIndex: number = -1;
+	private _repeatDragMode: number = -1;
+	private _repeatSnapshot: RepeatSection[] = [];
+	private _repeatChange: ChangeRepeatSections | null = null;
+	private _renderedRepeatSignature: string = "";
+
 	private _renderedLoopStart: number = -1;
 	private _renderedLoopStop: number = -1;
 	private _renderedBarCount: number = 0;
@@ -75,6 +97,7 @@ export class LoopEditor {
 		this._doc.notifier.watch(this._documentChanged);
 		
 		this.container.addEventListener("mousedown", this._whenMousePressed);
+		this.container.addEventListener("contextmenu", this._whenContextMenu);
 		document.addEventListener("mousemove", this._whenMouseMoved);
 		document.addEventListener("mouseup", this._whenCursorReleased);
 		this.container.addEventListener("mouseover", this._whenMouseOver);
@@ -113,6 +136,107 @@ export class LoopEditor {
 		}
 	}
 	
+	private _isInRepeatLane(): boolean {
+		return this._mouseY >= this._loopHeight;
+	}
+
+	private _getPointerRepeatRow(): number {
+		return Math.floor((this._mouseY - this._loopHeight) / this._repeatRowHeight);
+	}
+
+	// Prefers the loop drawn on the row the pointer is actually over, so a
+	// nested loop and the one around it stay independently clickable where they
+	// cover the same bar. Falls back to the innermost loop at that bar.
+	private _findSectionIndexAtBar(bar: number, row: number): number {
+		const sections: RepeatSection[] = this._doc.song.repeatSections;
+		let best: number = -1;
+		for (let i: number = 0; i < sections.length; i++) {
+			if (!sections[i].containsBar(bar)) continue;
+			if (getRepeatSectionDepth(sections, i) == row) return i;
+			if (best == -1 || sections[i].length < sections[best].length) best = i;
+		}
+		return best;
+	}
+
+	// Which part of a loop the pointer grabbed. The outer third of a short loop
+	// resizes it and the middle moves it, same division the playback loop uses.
+	private _findRepeatGrabMode(section: RepeatSection, bar: number): number {
+		const edge: number = Math.min(0.35, section.length / 3);
+		if (bar - section.start < edge) return this._startMode;
+		if (section.end - bar < edge) return this._endMode;
+		return this._bothMode;
+	}
+
+	private _beginRepeatDrag(): void {
+		this._draggingRepeat = true;
+		this._repeatDragStartBar = this._getPointerBarPos();
+		this._repeatDragStartRow = this._getPointerRepeatRow();
+		this._repeatDragMoved = false;
+		this._repeatSnapshot = this._doc.song.repeatSections.map(s => s.copy());
+		this._repeatDragIndex = this._findSectionIndexAtBar(Math.floor(this._repeatDragStartBar), this._repeatDragStartRow);
+		this._repeatDragMode = this._repeatDragIndex == -1
+			? this._bothMode
+			: this._findRepeatGrabMode(this._repeatSnapshot[this._repeatDragIndex], this._repeatDragStartBar);
+	}
+
+	// Recomputed from the snapshot on every pointer move rather than applied
+	// incrementally, so a drag that wanders over an illegal position and back
+	// lands exactly where the pointer says.
+	private _updateRepeatDrag(): void {
+		const song = this._doc.song;
+		const delta: number = Math.round(this._getPointerBarPos() - this._repeatDragStartBar);
+		if (delta != 0) this._repeatDragMoved = true;
+
+		const sections: RepeatSection[] = this._repeatSnapshot.map(s => s.copy());
+
+		if (this._repeatDragIndex == -1) {
+			if (this._repeatDragDeleting) return;
+			const startBar: number = Math.floor(this._repeatDragStartBar);
+			const endBar: number = Math.floor(this._getPointerBarPos());
+			const low: number = Math.max(0, Math.min(startBar, endBar));
+			const high: number = Math.min(song.barCount - 1, Math.max(startBar, endBar));
+			if (high < low) return;
+			sections.push(new RepeatSection(low, high - low + 1, 1));
+		} else {
+			const original: RepeatSection = this._repeatSnapshot[this._repeatDragIndex];
+			const moved: RepeatSection = sections[this._repeatDragIndex];
+			if (this._repeatDragMode == this._startMode) {
+				const newStart: number = Math.max(0, Math.min(original.end - 1, original.start + delta));
+				moved.start = newStart;
+				moved.length = original.end - newStart;
+			} else if (this._repeatDragMode == this._endMode) {
+				const newEnd: number = Math.min(song.barCount, Math.max(original.start + 1, original.end + delta));
+				moved.length = newEnd - original.start;
+			} else {
+				moved.start = Math.max(0, Math.min(song.barCount - original.length, original.start + delta));
+			}
+		}
+
+		// Refuse a position that would partially overlap another loop instead
+		// of letting sanitize silently delete the one being dragged.
+		if (sanitizeRepeatSections(sections, song.barCount).length != sections.length) return;
+
+		this._repeatChange = new ChangeRepeatSections(this._doc, this._repeatSnapshot, sections);
+		this._doc.setProspectiveChange(this._repeatChange);
+	}
+
+	private _commitRepeatDrag(): void {
+		// A grab that never moved is a click: cycle the repeat count, or delete.
+		if (this._repeatDragIndex != -1 && !this._repeatDragMoved) {
+			const sections: RepeatSection[] = this._repeatSnapshot.map(s => s.copy());
+			if (this._repeatDragDeleting) {
+				sections.splice(this._repeatDragIndex, 1);
+			} else {
+				const section: RepeatSection = sections[this._repeatDragIndex];
+				section.repeatCount = section.repeatCount >= this._maxRepeatCount ? 1 : section.repeatCount + 1;
+			}
+			this._doc.record(new ChangeRepeatSections(this._doc, this._repeatSnapshot, sections));
+			return;
+		}
+
+		if (this._repeatChange != null) this._doc.record(this._repeatChange);
+	}
+
 	private _findEndPoints(middle: number): Endpoints {
 		let start: number = Math.round(middle - this._doc.song.loopLength / 2);
 		let end: number = start + this._doc.song.loopLength;
@@ -148,15 +272,42 @@ export class LoopEditor {
 		this._mouseDown = true;
 		const boundingRect: ClientRect = this._svg.getBoundingClientRect();
 		this._mouseX = (event.clientX || event.pageX) - boundingRect.left;
+		this._mouseY = (event.clientY || event.pageY) - boundingRect.top;
+
+		if (this._isInRepeatLane()) {
+			this._repeatDragDeleting = event.altKey || event.button == 2;
+			this._beginRepeatDrag();
+			this._updatePreview();
+			return;
+		}
+
 		this._updateCursorStatus();
 		this._updatePreview();
 		this._whenMouseMoved(event);
 	}
-	
+
+	private _whenContextMenu = (event: MouseEvent): void => {
+		const boundingRect: ClientRect = this._svg.getBoundingClientRect();
+		this._mouseY = (event.clientY || event.pageY) - boundingRect.top;
+		if (this._isInRepeatLane()) event.preventDefault();
+	}
+
 	private _whenTouchPressed = (event: TouchEvent): void => {
 		this._mouseDown = true;
 		const boundingRect: ClientRect = this._svg.getBoundingClientRect();
 		this._mouseX = event.touches[0].clientX - boundingRect.left;
+		this._mouseY = event.touches[0].clientY - boundingRect.top;
+
+		if (this._isInRepeatLane()) {
+			this._repeatDragDeleting = false;
+			this._beginRepeatDrag();
+			this._clientStartX = event.touches[0].clientX;
+			this._clientStartY = event.touches[0].clientY;
+			this._draggingHorizontally = false;
+			this._startedScrolling = false;
+			return;
+		}
+
 		this._updateCursorStatus();
 		this._updatePreview();
 		this._clientStartX = event.touches[0].clientX;
@@ -174,6 +325,7 @@ export class LoopEditor {
 	private _whenMouseMoved = (event: MouseEvent): void => {
 		const boundingRect: ClientRect = this._svg.getBoundingClientRect();
 		this._mouseX = (event.clientX || event.pageX) - boundingRect.left;
+		if (!this._mouseDown) this._mouseY = (event.clientY || event.pageY) - boundingRect.top;
 		this._whenCursorMoved();
 	}
 	
@@ -201,6 +353,11 @@ export class LoopEditor {
 	//}
 	
 	private _whenCursorMoved(): void {
+		if (this._draggingRepeat) {
+			if (this._mouseDown) this._updateRepeatDrag();
+			this._updatePreview();
+			return;
+		}
 		if (this._mouseDown) {
 		//if (event.pointer!.isDown) {
 			let oldStart: number = this._doc.song.loopStart;
@@ -268,6 +425,16 @@ export class LoopEditor {
 	}
 	
 	private _whenCursorReleased = (event: Event): void => {
+		if (this._draggingRepeat) {
+			this._commitRepeatDrag();
+			this._draggingRepeat = false;
+			this._repeatDragStartBar = -1;
+			this._repeatDragIndex = -1;
+			this._repeatChange = null;
+			this._mouseDown = false;
+			this._render();
+			return;
+		}
 		if (this._change != null) this._doc.record(this._change);
 		this._change = null;
 		this._mouseDown = false;
@@ -283,13 +450,22 @@ export class LoopEditor {
 	//}
 	
 	private _updatePreview(): void {
+		// The highlight belongs to the playback loop, so it would be misleading
+		// over the repeat rows; those get a cursor hint instead.
+		if (this._mouseOver && this._isInRepeatLane()) {
+			this._highlight.style.display = "none";
+			this._updateRepeatCursor();
+			return;
+		}
+		this.container.style.cursor = "";
+
 		const showHighlight: boolean = this._mouseOver && !this._mouseDown;
 		//const showHighlight: boolean = this._pointers.latest.isHovering;
 		this._highlight.style.display = showHighlight ? "" : "none";
 		
 		if (showHighlight) {
-			const radius: number = this._editorHeight / 2;
-			
+			const radius: number = this._loopHeight / 2;
+
 			let highlightStart: number = (this._doc.song.loopStart) * this._barWidth;
 			let highlightStop: number = (this._doc.song.loopStart + this._doc.song.loopLength) * this._barWidth;
 			if (this._cursor.mode == this._startMode) {
@@ -305,22 +481,34 @@ export class LoopEditor {
 			this._highlight.setAttribute("d",
 				`M ${highlightStart + radius} ${4} ` +
 				`L ${highlightStop - radius} ${4} ` +
-				`A ${radius - 4} ${radius - 4} ${0} ${0} ${1} ${highlightStop - radius} ${this._editorHeight - 4} ` +
-				`L ${highlightStart + radius} ${this._editorHeight - 4} ` +
+				`A ${radius - 4} ${radius - 4} ${0} ${0} ${1} ${highlightStop - radius} ${this._loopHeight - 4} ` +
+				`L ${highlightStart + radius} ${this._loopHeight - 4} ` +
 				`A ${radius - 4} ${radius - 4} ${0} ${0} ${1} ${highlightStart + radius} ${4} ` +
 				`z`
 			);
 		}
 	}
 	
+	private _updateRepeatCursor(): void {
+		const bar: number = this._getPointerBarPos();
+		const index: number = this._findSectionIndexAtBar(Math.floor(bar), this._getPointerRepeatRow());
+		if (index == -1) {
+			this.container.style.cursor = "copy";
+			return;
+		}
+		const mode: number = this._findRepeatGrabMode(this._doc.song.repeatSections[index], bar);
+		this.container.style.cursor = mode == this._bothMode ? "grab" : "ew-resize";
+	}
+
 	private _documentChanged = (): void => {
 		this._render();
 	}
 	
 	private _render(): void {
 		this._barWidth = this._doc.getBarWidth();
-		
-		const radius: number = this._editorHeight / 2;
+		this._updateEditorHeight();
+
+		const radius: number = this._loopHeight / 2;
 		const loopStart: number = (this._doc.song.loopStart) * this._barWidth;
 		const loopStop: number = (this._doc.song.loopStart + this._doc.song.loopLength) * this._barWidth;
 		
@@ -338,13 +526,76 @@ export class LoopEditor {
 			this._loop.setAttribute("d",
 				`M ${loopStart + radius} ${2} ` +
 				`L ${loopStop - radius} ${2} ` +
-				`A ${radius - 2} ${radius - 2} ${0} ${0} ${1} ${loopStop - radius} ${this._editorHeight - 2} ` +
-				`L ${loopStart + radius} ${this._editorHeight - 2} ` +
+				`A ${radius - 2} ${radius - 2} ${0} ${0} ${1} ${loopStop - radius} ${this._loopHeight - 2} ` +
+				`L ${loopStart + radius} ${this._loopHeight - 2} ` +
 				`A ${radius - 2} ${radius - 2} ${0} ${0} ${1} ${loopStart + radius} ${2} ` +
 				`z`
 			);
 		}
 		
+		this._renderRepeatSections();
 		this._updatePreview();
+	}
+
+	private _updateEditorHeight(): void {
+		const sections: RepeatSection[] = this._doc.song.repeatSections;
+		let rows: number = 0;
+		for (let i: number = 0; i < sections.length; i++) {
+			rows = Math.max(rows, getRepeatSectionDepth(sections, i) + 1);
+		}
+		// Always keep one empty row available, otherwise there is nowhere to
+		// drag out the first repeat loop.
+		const height: number = this._loopHeight + Math.max(1, rows) * this._repeatRowHeight;
+		if (height == this._editorHeight) return;
+		this._editorHeight = height;
+		this._svg.setAttribute("height", height + "");
+		this.container.style.height = height + "px";
+	}
+
+	private _renderRepeatSections(): void {
+		const sections: RepeatSection[] = this._doc.song.repeatSections;
+		const signature: string = sections.map((s, i) =>
+			`${s.start}/${s.length}/${s.repeatCount}/${getRepeatSectionDepth(sections, i)}`).join(" ") + `@${this._barWidth}`;
+		if (signature == this._renderedRepeatSignature) return;
+		this._renderedRepeatSignature = signature;
+
+		while (this._repeatGroup.firstChild != null) this._repeatGroup.removeChild(this._repeatGroup.firstChild);
+
+		for (let i: number = 0; i < sections.length; i++) {
+			const section: RepeatSection = sections[i];
+			const depth: number = getRepeatSectionDepth(sections, i);
+			const color: string = ColorConfig.getRepeatSectionColor(depth);
+			const left: number = section.start * this._barWidth;
+			const width: number = section.length * this._barWidth;
+			const top: number = this._loopHeight + depth * this._repeatRowHeight + 2;
+			const height: number = this._repeatRowHeight - 4;
+
+			// The same pill the playback loop uses, just in its own colour, so
+			// a repeat reads as another loop bar rather than a different kind
+			// of thing.
+			this._repeatGroup.appendChild(SVG.rect({
+				x: left + 2,
+				y: top,
+				width: Math.max(1, width - 4),
+				height: height,
+				rx: height / 2,
+				ry: height / 2,
+				fill: "none",
+				stroke: color,
+				"stroke-width": 4,
+			}));
+
+			if (width >= 40) {
+				this._repeatGroup.appendChild(SVG.text({
+					x: left + width / 2,
+					y: top + height / 2 + 4,
+					fill: color,
+					"text-anchor": "middle",
+					"font-size": "11px",
+					"font-weight": "bold",
+					"pointer-events": "none",
+				}, `×${section.repeatCount + 1}`));
+			}
+		}
 	}
 }

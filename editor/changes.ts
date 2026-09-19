@@ -1,7 +1,7 @@
 // Copyright (c) John Nesky and contributing authors, distributed under the MIT license, see accompanying the LICENSE.md file.
 
 import {Algorithm, Dictionary, FilterType, SustainType, InstrumentType, EffectType, AutomationTarget, Config, effectsIncludePanning, effectsIncludeDistortion} from "../synth/SynthConfig.js";
-import {NotePin, Note, makeNotePin, Pattern, FilterSettings, FilterControlPoint, SpectrumWave, HarmonicsWave, Instrument, Channel, Song, Synth} from "../synth/synth.js";
+import {NotePin, Note, makeNotePin, Pattern, FilterSettings, FilterControlPoint, SpectrumWave, HarmonicsWave, Instrument, Channel, Song, Synth, RepeatSection, sanitizeRepeatSections} from "../synth/synth.js";
 import {Preset, PresetCategory, EditorConfig} from "./EditorConfig.js";
 import {Change, ChangeGroup, ChangeSequence, UndoableChange} from "./Change.js";
 import {SongDocument} from "./SongDocument.js";
@@ -1774,6 +1774,24 @@ export class ChangeLoop extends Change {
 			this._didSomething();
 		}
 	}
+}
+
+export class ChangeRepeatSections extends Change {
+	// oldSections is the state when the drag began, not the live song, which a
+	// prospective change has usually already mutated. Comparing against the
+	// live song would make the final change look empty and get discarded.
+	constructor(doc: SongDocument, public oldSections: RepeatSection[], newSections: RepeatSection[]) {
+		super();
+		doc.song.repeatSections = sanitizeRepeatSections(newSections, doc.song.barCount);
+		doc.notifier.changed();
+		if (describeRepeatSections(oldSections) != describeRepeatSections(doc.song.repeatSections)) {
+			this._didSomething();
+		}
+	}
+}
+
+function describeRepeatSections(sections: readonly RepeatSection[]): string {
+	return sections.map(s => `${s.start}/${s.length}/${s.repeatCount}`).join(" ");
 }
 
 export class ChangePitchAdded extends UndoableChange {

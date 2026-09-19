@@ -36,7 +36,7 @@ import {ImportPrompt} from "./ImportPrompt.js";
 import {SongRecoveryPrompt} from "./SongRecoveryPrompt.js";
 import {RecordingSetupPrompt} from "./RecordingSetupPrompt.js";
 import {Change} from "./Change.js";
-import {ChangeTempo, ChangeChorus, ChangeEchoDelay, ChangeEchoSustain, ChangeReverb, ChangeVolume, ChangePan, ChangePatternSelection, ChangeSupersawDynamism, ChangeSupersawSpread, ChangeSupersawShape, ChangePulseWidth, ChangeFeedbackAmplitude, ChangeOperatorAmplitude, ChangeOperatorFrequency, ChangeDrumsetEnvelope, ChangePasteInstrument, ChangePreset, pickRandomPresetValue, ChangeRandomGeneratedInstrument, ChangeScale, ChangeDetectKey, ChangeKey, ChangeRhythm, ChangeFeedbackType, ChangeAlgorithm, ChangeCustomizeInstrument, ChangeChipWave, ChangeNoiseWave, ChangeTransition, ChangeToggleEffects, ChangeVibrato, ChangeUnison, ChangeChord, ChangeSong, ChangePitchShift, ChangeDetune, ChangeDistortion, ChangeStringSustain, ChangeBitcrusherFreq, ChangeBitcrusherQuantization, ChangeAddEnvelope, ChangeAddChannelInstrument, ChangeRemoveChannelInstrument} from "./changes.js";
+import {ChangeTempo, ChangeChorus, ChangeEchoDelay, ChangeEchoSustain, ChangeReverb, ChangeVolume, ChangePan, ChangePatternSelection, ChangeSupersawDynamism, ChangeSupersawSpread, ChangeSupersawShape, ChangePulseWidth, ChangeFeedbackAmplitude, ChangeOperatorAmplitude, ChangeOperatorFrequency, ChangeDrumsetEnvelope, ChangePasteInstrument, ChangePreset, pickRandomPresetValue, ChangeRandomGeneratedInstrument, ChangeScale, ChangeDetectKey, ChangeKey, ChangeRhythm, ChangeFeedbackType, ChangeAlgorithm, ChangeCustomizeInstrument, ChangeChipWave, ChangeNoiseWave, ChangeTransition, ChangeToggleEffects, ChangeVibrato, ChangeUnison, ChangeChord, ChangeSong, ChangePitchShift, ChangeDetune, ChangeDistortion, ChangeStringSustain, ChangeBitcrusherFreq, ChangeBitcrusherQuantization, ChangeAddEnvelope, ChangeAddChannelInstrument, ChangeRemoveChannelInstrument, ChangeBarCount, ChangeDeleteBars, ChangeAddChannel, ChangeRemoveChannel} from "./changes.js";
 
 const {a, button, div, input, select, span, optgroup, option} = HTML;
 
@@ -248,7 +248,7 @@ export class SongEditor {
 		option({value: "recordingSetup"}, "Set Up Note Recording..."),
 	);
 	private readonly _scaleSelect: HTMLSelectElement = buildOptions(select(), Config.scales.map(scale=>scale.name));
-	private readonly _keySelect: HTMLSelectElement = buildOptions(select(), Config.keys.map(key=>key.name).reverse());
+	private readonly _keySelect: HTMLSelectElement = buildOptions(select(), Config.keys.map(key=>"Concert " + key.name).reverse());
 	private readonly _tempoSlider: Slider = new Slider(input({style: "margin: 0; width: 4em; flex-grow: 1; vertical-align: middle;", type: "range", min: "0", max: "14", value: "7", step: "1"}), this.doc, (oldValue: number, newValue: number) => new ChangeTempo(this.doc, oldValue, Math.round(120.0 * Math.pow(2.0, (-4.0 + newValue) / 9.0))));
 	private readonly _tempoStepper: HTMLInputElement = input({style: "width: 3em; margin-left: 0.4em; vertical-align: middle;", type: "number", step: "1"});
 	private readonly _chorusSlider: Slider = new Slider(input({style: "margin: 0;", type: "range", min: "0", max: Config.chorusRange - 1, value: "0", step: "1"}), this.doc, (oldValue: number, newValue: number) => new ChangeChorus(this.doc, oldValue, newValue));
@@ -399,15 +399,35 @@ export class SongEditor {
 		this._patternEditor.container,
 		this._patternEditorNext.container,
 	);
+	private readonly _partSelect: HTMLSelectElement = buildOptions(select(), EditorConfig.transposingParts.map(p => p.name));
+	private readonly _concertKeyLabel: HTMLDivElement = div({class: "concertKeyLabel"});
 	private readonly _patternArea: HTMLDivElement = div({class: "pattern-area"},
+		this._concertKeyLabel,
 		this._piano.container,
 		this._patternEditorRow,
 		this._octaveScrollBar.container,
 		this._zoomInButton,
 		this._zoomOutButton,
 	);
-	private readonly _trackContainer: HTMLDivElement = div({class: "trackContainer noSelection"},
+	private readonly _addMeasureButton: HTMLButtonElement = button({class: "measureButton", type: "button", title: "Add an empty measure to the end of the song"}, "+ measure");
+	private readonly _removeMeasureButton: HTMLButtonElement = button({class: "measureButton", type: "button", title: "Remove the last measure of the song"}, "- measure");
+	private readonly _measureButtons: HTMLDivElement = div({class: "measureButtons"},
+		this._addMeasureButton,
+		this._removeMeasureButton,
+	);
+	private readonly _trackRow: HTMLDivElement = div({class: "trackRow"},
 		this._trackEditor.container,
+		this._measureButtons,
+	);
+	private readonly _addInstrumentSlotButton: HTMLButtonElement = button({class: "slotButton", type: "button", title: "Add an instrument slot"}, "+ instrument");
+	private readonly _removeInstrumentSlotButton: HTMLButtonElement = button({class: "slotButton", type: "button", title: "Remove the last instrument slot"}, "- instrument");
+	private readonly _instrumentSlotBar: HTMLDivElement = div({class: "instrumentSlotBar"},
+		this._addInstrumentSlotButton,
+		this._removeInstrumentSlotButton,
+	);
+	private readonly _trackContainer: HTMLDivElement = div({class: "trackContainer noSelection"},
+		this._trackRow,
+		this._instrumentSlotBar,
 		this._loopEditor.container,
 	);
 	private readonly _trackVisibleArea: HTMLDivElement = div({style: "position: absolute; width: 100%; height: 100%; pointer-events: none;"});
@@ -445,6 +465,10 @@ export class SongEditor {
 			div({class: "selectRow"},
 				span({class: "tip", onclick: ()=>this._openPrompt("key")}, "Key:"),
 				div({class: "selectContainer"}, this._keySelect),
+			),
+			div({class: "selectRow"},
+				span({class: "tip", onclick: ()=>this._openPrompt("key")}, "My part:"),
+				div({class: "selectContainer"}, this._partSelect),
 			),
 			div({class: "selectRow"},
 				span({class: "tip", onclick: ()=>this._openPrompt("tempo")}, "Tempo:"),
@@ -589,6 +613,7 @@ export class SongEditor {
 		this._tempoStepper.addEventListener("change", this._whenSetTempo);
 		this._scaleSelect.addEventListener("change", this._whenSetScale);
 		this._keySelect.addEventListener("change", this._whenSetKey);
+		this._partSelect.addEventListener("change", this._whenSetPart);
 		this._rhythmSelect.addEventListener("change", this._whenSetRhythm);
 		this._pitchedPresetSelect.addEventListener("change", this._whenSetPitchedPreset);
 		this._drumPresetSelect.addEventListener("change", this._whenSetDrumPreset);
@@ -625,6 +650,10 @@ export class SongEditor {
 		this._prevBarButton.addEventListener("click", this._whenPrevBarPressed);
 		this._nextBarButton.addEventListener("click", this._whenNextBarPressed);
 		this._volumeSlider.input.addEventListener("input", this._setVolumeSlider);
+		this._addMeasureButton.addEventListener("click", this._whenAddMeasurePressed);
+		this._removeMeasureButton.addEventListener("click", this._whenRemoveMeasurePressed);
+		this._addInstrumentSlotButton.addEventListener("click", this._whenAddInstrumentSlotPressed);
+		this._removeInstrumentSlotButton.addEventListener("click", this._whenRemoveInstrumentSlotPressed);
 		this._zoomInButton.addEventListener("click", this._zoomIn);
 		this._zoomOutButton.addEventListener("click", this._zoomOut);
 		
@@ -782,6 +811,32 @@ export class SongEditor {
 		this.mainLayer.focus({preventScroll: true});
 	}
 	
+	private _whenAddMeasurePressed = (): void => {
+		if (this.doc.song.barCount >= Config.barCountMax) return;
+		this.doc.record(new ChangeBarCount(this.doc, this.doc.song.barCount + 1, false));
+		// Keep the button in view as the song grows past the visible width.
+		this.doc.barScrollPos = Math.max(0, this.doc.song.barCount + EditorConfig.addMeasureBarSpan - this.doc.trackVisibleBars);
+		this.doc.notifier.changed();
+	}
+
+	private _whenRemoveMeasurePressed = (): void => {
+		if (this.doc.song.barCount <= Config.barCountMin) return;
+		this.doc.record(new ChangeDeleteBars(this.doc, this.doc.song.barCount - 1, 1));
+	}
+
+	// Slots are pitch channels; the Edit menu still covers noise channels and
+	// inserting a slot anywhere other than the end.
+	private _whenAddInstrumentSlotPressed = (): void => {
+		if (this.doc.song.pitchChannelCount >= Config.pitchChannelCountMax) return;
+		this.doc.record(new ChangeAddChannel(this.doc, this.doc.song.pitchChannelCount, false));
+	}
+
+	private _whenRemoveInstrumentSlotPressed = (): void => {
+		const lastPitchChannel: number = this.doc.song.pitchChannelCount - 1;
+		if (lastPitchChannel < 1) return;
+		this.doc.record(new ChangeRemoveChannel(this.doc, lastPitchChannel, lastPitchChannel));
+	}
+
 	private _onFocusIn = (event: Event): void => {
 		if (this.doc.synth.recording && event.target != this.mainLayer && event.target != this._stopButton && event.target != this._volumeSlider.input) {
 			// Don't allow using tab to focus on the song settings while recording,
@@ -794,6 +849,14 @@ export class SongEditor {
 		const prefs: Preferences = this.doc.prefs;
 		this._muteEditor.container.style.display = prefs.enableChannelMuting ? "" : "none";
 		this.doc.trackVisibleBars = Math.floor((this._trackVisibleArea.clientWidth - (prefs.enableChannelMuting ? 32 : 0)) / this.doc.getBarWidth());
+		this._concertKeyLabel.textContent = "CONCERT " + Config.keys[this.doc.song.key].name;
+		setSelectedValue(this._partSelect, this.doc.prefs.transposingPart);
+		this._measureButtons.style.width = (EditorConfig.addMeasureBarSpan * this.doc.getBarWidth() - 2) + "px";
+		this._measureButtons.style.height = this._trackEditor.container.style.height;
+		this._removeMeasureButton.disabled = this.doc.song.barCount <= Config.barCountMin;
+		this._addMeasureButton.disabled = this.doc.song.barCount >= Config.barCountMax;
+		this._addInstrumentSlotButton.disabled = this.doc.song.pitchChannelCount >= Config.pitchChannelCountMax;
+		this._removeInstrumentSlotButton.disabled = this.doc.song.pitchChannelCount <= 1;
 		this.doc.trackVisibleChannels = Math.floor((this._trackVisibleArea.clientHeight - 30) / ChannelRow.patternHeight);
 		this._barScrollBar.render();
 		this._muteEditor.render();
@@ -1804,6 +1867,12 @@ export class SongEditor {
 		} else {
 			this.doc.record(new ChangeScale(this.doc, this._scaleSelect.selectedIndex));
 		}
+	}
+	
+	private _whenSetPart = (): void => {
+		this.doc.prefs.transposingPart = this._partSelect.selectedIndex;
+		this.doc.prefs.save();
+		this.doc.notifier.changed();
 	}
 	
 	private _whenSetKey = (): void => {

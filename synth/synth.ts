@@ -4,6 +4,9 @@ import {Dictionary, DictionaryArray, FilterType, SustainType, EnvelopeType, Inst
 import {scaleElementsByFactor, fastFourierTransform, forwardRealFourierTransform, inverseRealFourierTransform} from "./FFT.js";
 import {Deque} from "./Deque.js";
 import {FilterCoefficients, FrequencyResponse, DynamicBiquadFilter, warpInfinityToNyquist} from "./filtering.js";
+import {RepeatSection, RepeatTracker, sanitizeRepeatSections} from "./RepeatSections.js";
+
+export {RepeatSection, RepeatTracker, sanitizeRepeatSections, getRepeatSectionDepth} from "./RepeatSections.js";
 
 declare global {
 	interface Window {
@@ -145,7 +148,7 @@ const enum SongTagCode {
 //	                    = CharCode.G, // added in JummBox URL version 3 for arpeggioSpeed, DEPRECATED
 	harmonics           = CharCode.H, // added in BeepBox URL version 7
 	stringSustain       = CharCode.I, // added in BeepBox URL version 9
-//	                    = CharCode.J,
+	repeatSections      = CharCode.J, // added in Beepbox Reborn for nested repeat sections
 //	                    = CharCode.K,
 	pan                 = CharCode.L, // added between 8 and 9, DEPRECATED
 //	                    = CharCode.M, // added in JummBox URL version 1(?) for customChipWave
@@ -1797,6 +1800,7 @@ export class Song {
 	public patternInstruments: boolean;
 	public loopStart: number;
 	public loopLength: number;
+	public repeatSections: RepeatSection[] = [];
 	public pitchChannelCount: number;
 	public noiseChannelCount: number;
 	public readonly channels: Channel[] = [];
@@ -1834,13 +1838,20 @@ export class Song {
 	}
 	
 	public initToDefault(andResetChannels: boolean = true): void {
-		this.scale = 0;
-		this.key = 0;
+		// The full major scale, not upstream's pentatonic default, which hides
+		// seven of the twelve notes.
+		this.scale = Config.scales.dictionary["normal :)"].index;
+		// Concert Bb: the key most band music is written around.
+		this.key = Config.keys.dictionary["B♭"].index;
 		this.loopStart = 0;
 		this.loopLength = 4;
+		this.repeatSections.length = 0;
 		this.tempo = 150;
 		this.beatsPerBar = 8;
-		this.barCount = 16;
+		// Only the measures that actually hold a pattern. Upstream padded this
+		// out to 16, which left a row of empty "0" measures on every new song;
+		// the track editor's add-measure button covers that case now.
+		this.barCount = 4;
 		this.patternsPerChannel = 8;
 		this.rhythm = 1;
 		this.layeredInstruments = false;
@@ -1893,6 +1904,17 @@ export class Song {
 		buffer.push(SongTagCode.key, base64IntToCharCode[this.key]);
 		buffer.push(SongTagCode.loopStart, base64IntToCharCode[this.loopStart >> 6], base64IntToCharCode[this.loopStart & 0x3f]);
 		buffer.push(SongTagCode.loopEnd, base64IntToCharCode[(this.loopLength - 1) >> 6], base64IntToCharCode[(this.loopLength - 1) & 0x3f]);
+
+		// Omitted entirely when unused, so songs without repeats still produce
+		// URLs that upstream BeepBox can read.
+		if (this.repeatSections.length > 0) {
+			buffer.push(SongTagCode.repeatSections, base64IntToCharCode[this.repeatSections.length >> 6], base64IntToCharCode[this.repeatSections.length & 0x3f]);
+			for (const section of this.repeatSections) {
+				buffer.push(base64IntToCharCode[section.start >> 6], base64IntToCharCode[section.start & 0x3f]);
+				buffer.push(base64IntToCharCode[(section.length - 1) >> 6], base64IntToCharCode[(section.length - 1) & 0x3f]);
+				buffer.push(base64IntToCharCode[section.repeatCount - 1]);
+			}
+		}
 		buffer.push(SongTagCode.tempo, base64IntToCharCode[this.tempo >> 6], base64IntToCharCode[this.tempo & 63]);
 		buffer.push(SongTagCode.beatCount, base64IntToCharCode[this.beatsPerBar - 1]);
 		buffer.push(SongTagCode.barCount, base64IntToCharCode[(this.barCount - 1) >> 6], base64IntToCharCode[(this.barCount - 1) & 0x3f]);
@@ -2311,6 +2333,17 @@ export class Song {
 				} else {
 					this.loopLength = (base64CharCodeToInt[compressed.charCodeAt(charIndex++)] << 6) + base64CharCodeToInt[compressed.charCodeAt(charIndex++)] + 1;
 				}
+			} break;
+			case SongTagCode.repeatSections: {
+				const sectionCount: number = (base64CharCodeToInt[compressed.charCodeAt(charIndex++)] << 6) + base64CharCodeToInt[compressed.charCodeAt(charIndex++)];
+				const parsed: RepeatSection[] = [];
+				for (let i: number = 0; i < sectionCount; i++) {
+					const start: number = (base64CharCodeToInt[compressed.charCodeAt(charIndex++)] << 6) + base64CharCodeToInt[compressed.charCodeAt(charIndex++)];
+					const length: number = (base64CharCodeToInt[compressed.charCodeAt(charIndex++)] << 6) + base64CharCodeToInt[compressed.charCodeAt(charIndex++)] + 1;
+					const repeatCount: number = base64CharCodeToInt[compressed.charCodeAt(charIndex++)] + 1;
+					parsed.push(new RepeatSection(start, length, repeatCount));
+				}
+				this.repeatSections = parsed;
 			} break;
 			case SongTagCode.tempo: {
 				if (beforeFour) {
@@ -3242,8 +3275,12 @@ export class Song {
 				throw new Error("Unrecognized song tag code " + String.fromCharCode(command) + " at index " + (charIndex - 1));
 			} break;
 		}
+
+		// barCount is encoded after the repeat sections, so this can only be
+		// checked once the whole string has been read.
+		this.repeatSections = sanitizeRepeatSections(this.repeatSections, this.barCount);
 	}
-	
+
 	public toJsonObject(enableIntro: boolean = true, loopCount: number = 1, enableOutro: boolean = true): Object {
 		const channelArray: Object[] = [];
 		for (let channelIndex: number = 0; channelIndex < this.getChannelCount(); channelIndex++) {
@@ -3290,6 +3327,11 @@ export class Song {
 			"key": Config.keys[this.key].name,
 			"introBars": this.loopStart,
 			"loopBars": this.loopLength,
+			"repeatSections": this.repeatSections.map(section => ({
+				"start": section.start,
+				"length": section.length,
+				"repeatCount": section.repeatCount,
+			})),
 			"beatsPerBar": this.beatsPerBar,
 			"ticksPerBeat": Config.rhythms[this.rhythm].stepsPerBeat,
 			"beatsPerMinute": this.tempo,
@@ -3393,7 +3435,16 @@ export class Song {
 		if (jsonObject["loopBars"] != undefined) {
 			this.loopLength = clamp(1, this.barCount - this.loopStart + 1, jsonObject["loopBars"] | 0);
 		}
-		
+
+		this.repeatSections.length = 0;
+		if (Array.isArray(jsonObject["repeatSections"])) {
+			const parsed: RepeatSection[] = jsonObject["repeatSections"].map((section: any) => new RepeatSection(
+				section["start"] | 0,
+				section["length"] | 0,
+				Math.max(1, section["repeatCount"] | 0)));
+			this.repeatSections = sanitizeRepeatSections(parsed, this.barCount);
+		}
+
 		const newPitchChannels: Channel[] = [];
 		const newNoiseChannels: Channel[] = [];
 		if (jsonObject["channels"] != undefined) {
@@ -4648,6 +4699,8 @@ export class Synth {
 	public liveInputChannel: number = 0;
 	public liveInputInstruments: number[] = [];
 	public loopRepeatCount: number = -1;
+	private readonly repeatTracker: RepeatTracker = new RepeatTracker();
+	private repeatSectionsSignature: string = "";
 	public volume: number = 1.0;
 	public enableMetronome: boolean = false;
 	public countInMetronome: boolean = false;
@@ -4821,8 +4874,9 @@ export class Synth {
 		this.bar = bar;
 		this.playheadInternal = this.bar;
 		this.prevBar = null;
+		this.repeatTracker.reset();
 	}
-	
+
 	public snapToBar(): void {
 		this.playheadInternal = this.bar;
 		this.beat = 0;
@@ -4831,6 +4885,7 @@ export class Synth {
 		this.tickSampleCountdown = 0;
 		this.isAtStartOfTick = true;
 		this.prevBar = null;
+		this.repeatTracker.reset();
 	}
 	
 	public resetEffects(): void {
@@ -4877,18 +4932,42 @@ export class Synth {
 		this.playheadInternal += this.bar - oldBar;
 	}
 	
-	private getNextBar(): number {
+	// commit must be true only when the playhead is really moving on; the
+	// note-continuation lookahead calls this with false so repeat counters are
+	// not advanced by merely peeking.
+	private getNextBar(commit: boolean = true): number {
 		let nextBar: number = this.bar + 1;
 		if (this.isRecording) {
 			if (nextBar >= this.song!.barCount) {
 				nextBar = this.song!.barCount - 1;
 			}
-		} else if (this.loopRepeatCount != 0 && nextBar == this.song!.loopStart + this.song!.loopLength) {
+			return nextBar;
+		}
+
+		this.syncRepeatSections();
+		const repeatBar: number = commit
+			? this.repeatTracker.advancePastBar(this.bar)
+			: this.repeatTracker.peekNextBar(this.bar);
+		if (repeatBar != -1) return repeatBar;
+
+		if (this.loopRepeatCount != 0 && nextBar == this.song!.loopStart + this.song!.loopLength) {
 			nextBar = this.song!.loopStart;
+			if (commit) this.repeatTracker.reset();
 		}
 		return nextBar;
 	}
-	
+
+	private syncRepeatSections(): void {
+		if (this.song == null) return;
+		let signature: string = "";
+		for (const section of this.song.repeatSections) {
+			signature += section.start + "," + section.length + "," + section.repeatCount + ";";
+		}
+		if (signature == this.repeatSectionsSignature) return;
+		this.repeatSectionsSignature = signature;
+		this.repeatTracker.setSections(this.song.repeatSections);
+	}
+
 	private audioProcessCallback = (audioProcessingEvent: any): void => {
 		const outputBuffer = audioProcessingEvent.outputBuffer;
 		const outputDataL: Float32Array = outputBuffer.getChannelData(0);
@@ -4971,7 +5050,7 @@ export class Synth {
 		let bufferIndex: number = 0;
 		while (bufferIndex < outputBufferLength && !ended) {
 			
-			this.nextBar = this.getNextBar();
+			this.nextBar = this.getNextBar(false);
 			if (this.nextBar >= song.barCount) this.nextBar = null;
 			
 			const samplesLeftInBuffer: number = outputBufferLength - bufferIndex;

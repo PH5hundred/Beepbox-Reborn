@@ -1,6 +1,7 @@
 // Copyright (c) John Nesky and contributing authors, distributed under the MIT license, see accompanying the LICENSE.md file.
 
 import {Config} from "../synth/SynthConfig.js";
+import {EditorConfig} from "./EditorConfig.js";
 import {ColorConfig} from "./ColorConfig.js";
 import {SongDocument} from "./SongDocument.js";
 import {HTML} from "imperative-html/dist/esm/elements-strict.js";
@@ -10,7 +11,7 @@ export class Piano {
 	private readonly _pianoContainer: HTMLDivElement = HTML.div({style: "width: 100%; height: 100%; display: flex; flex-direction: column-reverse; align-items: stretch;"});
 	private readonly _drumContainer: HTMLDivElement = HTML.div({style: "width: 100%; height: 100%; display: flex; flex-direction: column-reverse; align-items: stretch;"});
 	private readonly _preview: HTMLDivElement = HTML.div({style: `width: 100%; height: 40px; border: 2px solid ${ColorConfig.primaryText}; position: absolute; box-sizing: border-box; pointer-events: none;`});
-	public readonly container: HTMLDivElement = HTML.div({style: "width: 32px; height: 100%; overflow: hidden; position: relative; flex-shrink: 0; touch-action: none;"},
+	public readonly container: HTMLDivElement = HTML.div({style: "width: 56px; height: 100%; overflow: hidden; position: relative; flex-shrink: 0; touch-action: none;"},
 		this._pianoContainer,
 		this._drumContainer,
 		this._preview,
@@ -21,6 +22,13 @@ export class Piano {
 	private readonly _editorHeight: number = 481;
 	private readonly _pianoKeys: HTMLDivElement[] = [];
 	private readonly _pianoLabels: HTMLDivElement[] = [];
+	private readonly _partLabels: HTMLDivElement[] = [];
+	// Written keys that are conventionally spelled with sharps. An Eb alto part
+	// in concert Bb is written in G major, where the raised note is F♯, not G♭.
+	private static readonly _sharpKeys: ReadonlyArray<number> = [7, 2, 9, 4, 11, 6];
+	private static readonly _sharpNames: ReadonlyArray<string> = ["C", "C♯", "D", "D♯", "E", "F", "F♯", "G", "G♯", "A", "A♯", "B"];
+	private _renderedPart: number = -1;
+	private _renderedOutsideScale: boolean = false;
 	
 	private _pitchHeight: number;
 	private _pitchCount: number;
@@ -169,9 +177,11 @@ export class Piano {
 		if (this._pointers.latest.isDown) this._playLiveInput();
 		
 		if (!this._doc.prefs.showLetters) return;
-		if (this._renderedScale == this._doc.song.scale && this._renderedKey == this._doc.song.key && this._renderedDrums == isDrum && this._renderedPitchCount == this._pitchCount) return;
+		if (this._renderedScale == this._doc.song.scale && this._renderedKey == this._doc.song.key && this._renderedDrums == isDrum && this._renderedPitchCount == this._pitchCount && this._renderedPart == this._doc.prefs.transposingPart && this._renderedOutsideScale == this._doc.prefs.notesOutsideScale) return;
 		
 		this._renderedScale = this._doc.song.scale;
+		this._renderedPart = this._doc.prefs.transposingPart;
+		this._renderedOutsideScale = this._doc.prefs.notesOutsideScale;
 		this._renderedKey = this._doc.song.key;
 		this._renderedDrums = isDrum;
 		
@@ -182,13 +192,16 @@ export class Piano {
 			if (this._renderedPitchCount != this._pitchCount) {
 				this._pianoContainer.innerHTML = "";
 				for (let i: number = 0; i < this._pitchCount; i++) {
-					const pianoLabel: HTMLDivElement = HTML.div({class: "piano-label", style: "font-weight: bold; -webkit-text-stroke-width: 0; font-size: 11px; font-family: sans-serif; position: absolute; padding-left: 15px;"});
-					const pianoKey: HTMLDivElement = HTML.div({class: "piano-button", style: "background: gray;"}, pianoLabel);
+					const pianoLabel: HTMLDivElement = HTML.div({class: "piano-label"});
+					const partLabel: HTMLDivElement = HTML.div({class: "piano-part-label"});
+					const pianoKey: HTMLDivElement = HTML.div({class: "piano-button", style: "background: gray;"}, pianoLabel, partLabel);
 					this._pianoContainer.appendChild(pianoKey);
 					this._pianoLabels[i] = pianoLabel;
+					this._partLabels[i] = partLabel;
 					this._pianoKeys[i] = pianoKey;
 				}
 				this._pianoLabels.length = this._pitchCount;
+				this._partLabels.length = this._pitchCount;
 				this._pianoKeys.length = this._pitchCount;
 				this._renderedPitchCount = this._pitchCount;
 			}
@@ -197,16 +210,32 @@ export class Piano {
 				const pitchNameIndex: number = (j + Config.keys[this._doc.song.key].basePitch) % Config.pitchesPerOctave;
 				const isWhiteKey: boolean = Config.keys[pitchNameIndex].isWhiteKey;
 				this._pianoKeys[j].style.background = isWhiteKey ? ColorConfig.whitePianoKey : ColorConfig.blackPianoKey;
-				if (!Config.scales[this._doc.song.scale].flags[j % Config.pitchesPerOctave]) {
-					this._pianoKeys[j].classList.add("disabled");
-					this._pianoLabels[j].style.display = "none";
-				} else {
-					this._pianoKeys[j].classList.remove("disabled");
-					this._pianoLabels[j].style.display = "";
-					
+				const inScale: boolean = Config.scales[this._doc.song.scale].flags[j % Config.pitchesPerOctave];
+				// A note outside the scale still gets a name when it can be
+				// played; hiding the name made usable keys look unavailable.
+				const named: boolean = inScale || this._doc.prefs.notesOutsideScale;
+				this._pianoKeys[j].classList.toggle("disabled", !inScale);
+				this._pianoLabels[j].style.display = named ? "" : "none";
+				this._partLabels[j].style.display = "none";
+
+				if (named) {
+					const textColor: string = Config.keys[pitchNameIndex].isWhiteKey ? "black" : "white";
 					const label: HTMLDivElement = this._pianoLabels[j];
-					label.style.color = Config.keys[pitchNameIndex].isWhiteKey ? "black" : "white";
+					label.style.color = textColor;
 					label.textContent = Piano.getPitchName(pitchNameIndex, j);
+
+					const part = EditorConfig.transposingParts[this._doc.prefs.transposingPart];
+					if (part != undefined && part.semitones != 0) {
+						const writtenIndex: number = (pitchNameIndex + part.semitones) % Config.pitchesPerOctave;
+						const writtenKey: number = (this._doc.song.key + part.semitones) % Config.pitchesPerOctave;
+						const useSharps: boolean = Piano._sharpKeys.indexOf(writtenKey) != -1;
+						const partLabel: HTMLDivElement = this._partLabels[j];
+						partLabel.style.display = "";
+						partLabel.style.color = textColor;
+						partLabel.textContent = useSharps
+							? Piano._sharpNames[writtenIndex]
+							: Piano.getPitchName(writtenIndex, writtenIndex);
+					}
 				}
 			}
 		}
@@ -219,13 +248,10 @@ export class Piano {
 		if (Config.keys[pitchNameIndex].isWhiteKey) {
 			text = Config.keys[pitchNameIndex].name;
 		} else {
-			const shiftDir: number = Config.blackKeyNameParents[scaleIndex % Config.pitchesPerOctave];
-			text = Config.keys[(pitchNameIndex + Config.pitchesPerOctave + shiftDir) % Config.pitchesPerOctave].name;
-			if (shiftDir == 1) {
-				text += "♭";
-			} else if (shiftDir == -1) {
-				text += "♯";
-			}
+			// Config.keys spells the black keys as flats, matching the concert
+			// keys in the key menu. Deriving a name from the neighbouring white
+			// key instead would print A♯ next to a label reading CONCERT B♭.
+			text = Config.keys[pitchNameIndex].name;
 		}
 		
 		return text;

@@ -76,7 +76,7 @@ export class BarScrollBar {
 				}
 			}
 			while (this._mouseX - this._dragStart > this._notchSpace * 0.5) {
-				if (this._doc.barScrollPos < this._doc.song.barCount - this._doc.trackVisibleBars) {
+				if (this._doc.barScrollPos < this._doc.getScrollableBarCount() - this._doc.trackVisibleBars) {
 					this._doc.barScrollPos++;
 					this._dragStart += this._notchSpace;
 					this._doc.notifier.changed();
@@ -112,7 +112,7 @@ export class BarScrollBar {
 				if (this._doc.barScrollPos > 0) this._doc.barScrollPos--;
 				this._doc.notifier.changed();
 			} else {
-				if (this._doc.barScrollPos < this._doc.song.barCount - this._doc.trackVisibleBars) this._doc.barScrollPos++;
+				if (this._doc.barScrollPos < this._doc.getScrollableBarCount() - this._doc.trackVisibleBars) this._doc.barScrollPos++;
 				this._doc.notifier.changed();
 			}
 		}
@@ -142,7 +142,7 @@ export class BarScrollBar {
 	}
 	
 	public render(): void {
-		this._notchSpace = (this._editorWidth-1) / Math.max(this._doc.trackVisibleBars, this._doc.song.barCount);
+		this._notchSpace = (this._editorWidth-1) / Math.max(this._doc.trackVisibleBars, this._doc.getScrollableBarCount());
 		
 		const resized: boolean = this._renderedNotchCount != this._doc.song.barCount;
 		if (resized) {
