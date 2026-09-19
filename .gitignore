@@ -15,3 +15,6 @@
 /website/competition/**/beepbox*.js
 /website/competition/**/beepbox*.js.map
 /website/beepbox_offline.html
+
+# node_modules lives behind a .nosync symlink so iCloud never syncs it.
+/node_modules.nosync
