@@ -4,6 +4,7 @@
 	"type": "module",
 	"private": true,
 	"scripts": {
+		"prebuild": "node scripts/nosync-deps.cjs",
 		"build": "npm run clean && npm run build-synth && npm run build-player && npm run build-editor",
 		"build-synth": "bash ./scripts/compile_synth.sh",
 		"build-player": "bash ./scripts/compile_player.sh",
