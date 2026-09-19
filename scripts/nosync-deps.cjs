@@ -5,6 +5,10 @@ const fs = require("fs");
 const path = require("path");
 
 const root = path.join(__dirname, "..");
+
+// Only relevant inside iCloud Drive. On any other machine this is a no-op, so
+// a fresh clone elsewhere gets a plain node_modules and no surprise symlink.
+if (!root.includes("com~apple~CloudDocs")) process.exit(0);
 const link = path.join(root, "node_modules");
 const store = path.join(root, "node_modules.nosync");
 
