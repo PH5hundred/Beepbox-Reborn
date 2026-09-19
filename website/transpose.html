@@ -159,7 +159,7 @@
 		return idx >= 0 ? INSTRUMENTS[idx] : null;
 	}
 
-	document.getElementById("generate").addEventListener("click", function () {
+	function regenerate() {
 		var status = document.getElementById("status");
 		var sheet = document.getElementById("sheet");
 		sheet.innerHTML = "";
@@ -171,7 +171,17 @@
 		status.textContent = wrote === 0
 			? "Nothing to write - no notes in this song yet."
 			: "Wrote " + wrote + " part" + (wrote === 1 ? "" : "s") + ".";
-	});
+	}
+
+	document.getElementById("generate").addEventListener("click", regenerate);
+
+	// Redraw as soon as an instrument changes, so what is on screen always
+	// matches the dropdowns rather than the last time Generate was pressed.
+	for (var q = 0; q < selects.length; q++) {
+		selects[q].select.addEventListener("change", function () {
+			if (document.getElementById("sheet").children.length) regenerate();
+		});
+	}
 
 	// Swapping the instrument changes the song itself, so hand the edited song
 	// back to the editor as a new link.

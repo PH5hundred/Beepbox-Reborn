@@ -116,8 +116,14 @@ var SheetMusic = (function () {
 		var container = document.createElement("div");
 		var title = document.createElement("div");
 		title.className = "part-title";
+		var KEY_NAMES = ["C", "D\u266D", "D", "E\u266D", "E", "F",
+		                 "G\u266D", "G", "A\u266D", "A", "B\u266D", "B"];
+		var writtenKeyName = KEY_NAMES[((song.key + part.semitones) % 12 + 12) % 12];
 		title.innerHTML = "Channel " + (channelIndex + 1) +
-			' <span>&mdash; ' + part.name + "</span>";
+			' <span>&mdash; ' + part.name +
+			(part.semitones ? " &middot; written in " + writtenKeyName +
+				" (sounds " + KEY_NAMES[song.key] + ")" : " &middot; " + KEY_NAMES[song.key]) +
+			"</span>";
 		container.appendChild(title);
 
 		if (notes.length === 0) {
@@ -147,7 +153,7 @@ var SheetMusic = (function () {
 		// geometry
 		var GAP = 7;                          // half a staff space
 		var STAFF = GAP * 8;                  // four spaces
-		var LEFT = 34 + Math.max(1, sig.count) * 8 + 12;   // clef + key signature
+		var LEFT = 34 + Math.max(1, sig.count) * 8 + 26;   // clef + key signature + time signature
 		var BAR_W = Math.max(90, 34 * song.beatsPerBar);
 		var PER_LINE = Math.max(1, Math.min(4, Math.floor(760 / BAR_W)));
 		var lines = Math.ceil(song.barCount / PER_LINE);
@@ -157,6 +163,11 @@ var SheetMusic = (function () {
 
 		var svg = el("svg", {width: width, height: height,
 			viewBox: "0 0 " + width + " " + height, xmlns: SVGNS});
+
+		// tempo mark, written above the first system
+		glyph(svg, 8, 16, "\u2669 = " + song.tempo, 12);
+
+		var clefs = [];
 
 		for (var line = 0; line < lines; line++) {
 			var top = 30 + line * LINE_H;
@@ -168,15 +179,33 @@ var SheetMusic = (function () {
 				el("line", {x1: 8, y1: top + s * GAP * 2, x2: x0 + lineW, y2: top + s * GAP * 2,
 					stroke: "#000", "stroke-width": 1}, svg);
 			}
-			// clef
-			glyph(svg, 12, treble ? top + GAP * 6.2 : top + GAP * 3.4,
-				treble ? "\u{1D11E}" : "\u{1D122}", treble ? 46 : 38);
+			// Clef. A treble clef must curl around the G line (2nd from the
+			// bottom) and a bass clef sit on the F line (2nd from the top) -
+			// that is the reference a reader counts from, so a clef placed by
+			// guesswork shifts every note. Font metrics for these glyphs vary,
+			// so measure the drawn glyph and align its centre to that line
+			// rather than trusting an offset.
+			clefs.push({
+				node: glyph(svg, 12, top + STAFF / 2, treble ? "\u{1D11E}" : "\u{1D122}",
+					treble ? 46 : 38),
+				lineY: top + STAFF - (treble ? 2 : 6) * GAP,
+				// Where the reference point sits within the glyph: the treble
+				// spiral is low in its box, the bass curl and dots are high.
+				anchor: treble ? 0.72 : 0.26,
+			});
 
 			// key signature, at the conventional staff positions
 			var posList = SIG_POS[treble ? "treble" : "bass"][sig.type >= 0 ? "sharp" : "flat"];
 			for (var k = 0; k < sig.count; k++) {
 				var ky = top + STAFF - posList[k] * GAP;
 				glyph(svg, 30 + k * 8, ky + 5, sig.type >= 0 ? "♯" : "♭", 15);
+			}
+
+			// time signature, once, at the start
+			if (line === 0) {
+				var tsx = LEFT - 11;
+				glyph(svg, tsx, top + GAP * 3.6, String(song.beatsPerBar), 15);
+				glyph(svg, tsx, top + STAFF - 1, "4", 15);
 			}
 
 			// barlines
@@ -242,7 +271,28 @@ var SheetMusic = (function () {
 		}
 
 		container.appendChild(svg);
+
+		// getBBox only reports real numbers once the node is actually in the
+		// document, and this container is still detached, so align on the next
+		// frame - by then the caller has appended it.
+		alignClefsLater(clefs);
 		return container;
+	}
+
+	function alignClefsLater(clefs) {
+		if (!clefs.length) return;
+		var run = function () {
+			for (var c = 0; c < clefs.length; c++) {
+				var node = clefs[c].node, box;
+				try { box = node.getBBox(); } catch (e) { continue; }
+				if (!box || !box.height) continue;
+				var anchorY = box.y + box.height * clefs[c].anchor;
+				node.setAttribute("y", String(
+					parseFloat(node.getAttribute("y")) + (clefs[c].lineY - anchorY)));
+			}
+		};
+		if (typeof requestAnimationFrame === "function") requestAnimationFrame(run);
+		else setTimeout(run, 0);
 	}
 
 	function isInKeySignature(sp, sig) {
