@@ -437,9 +437,12 @@ export class SongEditor {
 		this._trackVisibleArea,
 	);
 	private readonly _barScrollBar: BarScrollBar = new BarScrollBar(this.doc, this._trackAndMuteContainer);
+	private readonly _sheetMusicButton: HTMLButtonElement = button({class: "sheetMusicButton", type: "button", title: "Transpose the song and write it out as sheet music"}, "Transpose / Generate Sheet Music");
+	private readonly _sheetMusicBar: HTMLDivElement = div({class: "sheetMusicBar"}, this._sheetMusicButton);
 	private readonly _trackArea: HTMLDivElement = div({class: "track-area"},
 		this._trackAndMuteContainer,
 		this._barScrollBar.container,
+		this._sheetMusicBar,
 	);
 	
 	private readonly _menuArea: HTMLDivElement = div({class: "menu-area"},
@@ -652,6 +655,7 @@ export class SongEditor {
 		this._volumeSlider.input.addEventListener("input", this._setVolumeSlider);
 		this._addMeasureButton.addEventListener("click", this._whenAddMeasurePressed);
 		this._removeMeasureButton.addEventListener("click", this._whenRemoveMeasurePressed);
+		this._sheetMusicButton.addEventListener("click", this._whenSheetMusicPressed);
 		this._addInstrumentSlotButton.addEventListener("click", this._whenAddInstrumentSlotPressed);
 		this._removeInstrumentSlotButton.addEventListener("click", this._whenRemoveInstrumentSlotPressed);
 		this._zoomInButton.addEventListener("click", this._zoomIn);
@@ -826,6 +830,11 @@ export class SongEditor {
 
 	// Slots are pitch channels; the Edit menu still covers noise channels and
 	// inserting a slot anywhere other than the end.
+	private _whenSheetMusicPressed = (): void => {
+		// TODO: transpose the song for a chosen part and render it as notation.
+		// Wired up but deliberately inert until that exists.
+	}
+	
 	private _whenAddInstrumentSlotPressed = (): void => {
 		if (this.doc.song.pitchChannelCount >= Config.pitchChannelCountMax) return;
 		this.doc.record(new ChangeAddChannel(this.doc, this.doc.song.pitchChannelCount, false));

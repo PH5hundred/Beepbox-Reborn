@@ -1151,6 +1151,23 @@ document.head.appendChild(HTML.style({type: "text/css"}, `
 	color: ${ColorConfig.primaryText};
 }
 
+.beepboxEditor .sheetMusicBar {
+	display: flex;
+	justify-content: center;
+	padding: 4px 0 2px 0;
+}
+
+.beepboxEditor .sheetMusicButton {
+	width: 100%;
+	max-width: 512px;
+	height: 24px;
+	padding: 0 10px;
+	font-size: 12px;
+	white-space: nowrap;
+	overflow: hidden;
+	text-overflow: ellipsis;
+}
+
 .beepboxEditor .instrumentSlotBar {
 	display: flex;
 	gap: 4px;
