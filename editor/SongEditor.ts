@@ -234,6 +234,7 @@ export class SongEditor {
 		option({value: "autoFollow"}, "Automatically View Current Bar"),
 		option({value: "enableNotePreview"}, "Hear Preview of Added Notes"),
 		option({value: "showLetters"}, "Show Piano Keys"),
+		option({value: "showStaff"}, "Show Staff Lines"),
 		option({value: "showFifth"}, 'Highlight "Fifth" of Song Key'),
 		option({value: "notesOutsideScale"}, "Allow Adding Notes Not in Scale"),
 		option({value: "setDefaultScale"}, "Use Current Scale as Default"),
@@ -931,6 +932,7 @@ export class SongEditor {
 			(prefs.autoFollow ? "✓ " : "　") + "Automatically View Current Bar",
 			(prefs.enableNotePreview ? "✓ " : "　") + "Hear Preview of Added Notes",
 			(prefs.showLetters ? "✓ " : "　") + "Show Piano Keys",
+			(prefs.showStaff ? "✓ " : "　") + "Show Staff Lines",
 			(prefs.showFifth ? "✓ " : "　") + 'Highlight "Fifth" of Song Key',
 			(prefs.notesOutsideScale ? "✓ " : "　") + "Allow Adding Notes Not in Scale",
 			(prefs.defaultScale == this.doc.song.scale ? "✓ " : "　") + "Use Current Scale as Default",
@@ -2159,6 +2161,9 @@ export class SongEditor {
 				break;
 			case "enableNotePreview":
 				this.doc.prefs.enableNotePreview = !this.doc.prefs.enableNotePreview;
+				break;
+			case "showStaff":
+				this.doc.prefs.showStaff = !this.doc.prefs.showStaff;
 				break;
 			case "showLetters":
 				this.doc.prefs.showLetters = !this.doc.prefs.showLetters;

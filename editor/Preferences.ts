@@ -12,6 +12,7 @@ export class Preferences {
 	public notesOutsideScale: boolean;
 	public defaultScale: number;
 	public showLetters: boolean;
+	public showStaff: boolean;
 	public transposingPart: number;
 	public showChannels: boolean;
 	public showScrollBar: boolean;
@@ -48,6 +49,8 @@ export class Preferences {
 		// concert scale you are writing in.
 		this.showLetters = this._loadBoolean("showLetters", true);
 		this.transposingPart = ((<any>window.localStorage.getItem("transposingPart")) >>> 0) || 0;
+		// Off by default: it is a reading aid, not something every song wants.
+		this.showStaff = this._loadBoolean("showStaff", false);
 		this.showChannels = this._loadBoolean("showChannels", false);
 		this.showScrollBar = this._loadBoolean("showScrollBar", false);
 		this.alwaysShowSettings = this._loadBoolean("alwaysShowSettings", false);
@@ -90,6 +93,7 @@ export class Preferences {
 		window.localStorage.setItem("defaultScale", Config.scales[this.defaultScale].name);
 		window.localStorage.setItem("showLetters", this.showLetters ? "true" : "false");
 		window.localStorage.setItem("transposingPart", String(this.transposingPart));
+		window.localStorage.setItem("showStaff", this.showStaff ? "true" : "false");
 		window.localStorage.setItem("showChannels", this.showChannels ? "true" : "false");
 		window.localStorage.setItem("showScrollBar", this.showScrollBar ? "true" : "false");
 		window.localStorage.setItem("alwaysShowSettings", this.alwaysShowSettings ? "true" : "false");

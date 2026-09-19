@@ -39,6 +39,7 @@ export class PatternEditor {
 	private readonly _svgDrumBackground: SVGPatternElement = SVG.pattern({x: "0", y: "0", patternUnits: "userSpaceOnUse"});
 	private readonly _svgBackground: SVGRectElement = SVG.rect({x: "0", y: "0", "pointer-events": "none"});
 	private _svgNoteContainer: SVGSVGElement = SVG.svg();
+	private readonly _svgStaffLines: SVGGElement = SVG.g({"pointer-events": "none"});
 	private readonly _svgPlayhead: SVGRectElement = SVG.rect({x: "0", y: "0", width: "4", fill: ColorConfig.playhead, "pointer-events": "none"});
 	private readonly _selectionRect: SVGRectElement = SVG.rect({fill: ColorConfig.boxSelectionFill, stroke: ColorConfig.hoverPreview, "stroke-width": 2, "stroke-dasharray": "5, 3", "pointer-events": "none", display: "none"});
 	private readonly _svgPreview: SVGPathElement = SVG.path({fill: "none", stroke: ColorConfig.hoverPreview, "stroke-width": "2", "pointer-events": "none"});
@@ -48,6 +49,7 @@ export class PatternEditor {
 			this._svgDrumBackground,
 		),
 		this._svgBackground,
+		this._svgStaffLines,
 		this._selectionRect,
 		this._svgNoteContainer,
 		this._svgPreview,
@@ -58,6 +60,10 @@ export class PatternEditor {
 	private readonly _pointers: EasyPointers = new EasyPointers(this._svg, {holdStillMinMillis: 800});
 	
 	private readonly _backgroundPitchRows: SVGRectElement[] = [];
+	// Where the five lines of each staff fall, as MIDI pitches.
+	private static readonly _trebleLines: ReadonlyArray<number> = [64, 67, 71, 74, 77];
+	private static readonly _bassLines: ReadonlyArray<number> = [43, 47, 50, 53, 57];
+	private _renderedStaff: string = "";
 	private readonly _backgroundDrumRow: SVGRectElement = SVG.rect();
 	
 	private _editorWidth: number;
@@ -162,6 +168,36 @@ export class PatternEditor {
 	private _snapToMinDivision(input: number): number {
 		const minDivision: number = this._getMinDivision();
 		return Math.floor(input / minDivision) * minDivision;
+	}
+	
+	// An optional overlay marking where the printed staff sits, so the rows in
+	// the editor can be lined up against real notation.
+	private _updateStaffLines(): void {
+		const isDrum: boolean = this._doc.song.getChannelIsNoise(this._doc.channel);
+		const show: boolean = this._doc.prefs.showStaff && !isDrum;
+		const basePitch: number = Config.keys[this._doc.song.key].basePitch;
+		const signature: string = show
+			? [basePitch, this._octaveOffset, this._pitchCount, Math.round(this._editorHeight), Math.round(this._editorWidth)].join(",")
+			: "";
+		if (signature == this._renderedStaff) return;
+		this._renderedStaff = signature;
+		
+		while (this._svgStaffLines.firstChild != null) this._svgStaffLines.removeChild(this._svgStaffLines.firstChild);
+		if (!show) return;
+		
+		const draw = (midiPitches: ReadonlyArray<number>): void => {
+			for (const midi of midiPitches) {
+				const row: number = midi - basePitch - this._octaveOffset;
+				if (row < 0 || row >= this._pitchCount) continue;
+				const y: number = (this._pitchCount - row - 0.5) * this._pitchHeight;
+				this._svgStaffLines.appendChild(SVG.line({
+					x1: 0, y1: y, x2: this._editorWidth, y2: y,
+					stroke: ColorConfig.primaryText, "stroke-width": 1, "stroke-opacity": 0.35,
+				}));
+			}
+		};
+		draw(PatternEditor._trebleLines);
+		draw(PatternEditor._bassLines);
 	}
 	
 	private _updateCursorStatus(): void {
@@ -1072,6 +1108,8 @@ export class PatternEditor {
 		for (let j: number = 0; j < Config.pitchesPerOctave; j++) {
 			this._backgroundPitchRows[j].style.visibility = Config.scales[this._doc.song.scale].flags[j] ? "visible" : "hidden";
 		}
+		
+		this._updateStaffLines();
 		
 		if (this._doc.song.getChannelIsNoise(this._doc.channel)) {
 			if (!this._renderedDrums) {
