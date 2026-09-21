@@ -1979,7 +1979,7 @@ export class ChangeEnsurePatternExists extends UndoableChange {
 		if (firstEmptyUnusedIndex != null) {
 			this._patternIndex = firstEmptyUnusedIndex;
 			this._oldPatternInstruments = song.channels[channelIndex].patterns[firstEmptyUnusedIndex - 1].instruments.concat();
-		} else if (song.patternsPerChannel < song.barCount) {
+		} else if (song.patternsPerChannel < Config.barCountMax) {
 			this._newPatternCount = song.patternsPerChannel + 1;
 			this._patternIndex = song.patternsPerChannel + 1;
 		} else if (firstUnusedIndex != null) {

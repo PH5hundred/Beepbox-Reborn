@@ -114,6 +114,12 @@ export class Selection {
 	}
 	
 	public setPattern(pattern: number): void {
+		// A new song starts with room for eight patterns per channel, but the count
+		// is stored in the song itself, so it can grow on demand instead of being a
+		// ceiling. Asking for a pattern past the end allocates up to it.
+		if (pattern > this._doc.song.patternsPerChannel && pattern <= Config.barCountMax) {
+			this._doc.record(new ChangePatternsPerChannel(this._doc, pattern));
+		}
 		this._doc.record(new ChangePatternNumbers(this._doc, pattern, this.boxSelectionBar, this.boxSelectionChannel, this.boxSelectionWidth, this.boxSelectionHeight));
 	}
 	
@@ -143,14 +149,14 @@ export class Selection {
 			
 			this.digits += digit;
 			let parsed: number = parseInt(this.digits);
-			if (parsed <= this._doc.song.patternsPerChannel) {
+			if (parsed <= Config.barCountMax) {
 				this.setPattern(parsed);
 				return;
 			}
 			
 			this.digits = digit;
 			parsed = parseInt(this.digits);
-			if (parsed <= this._doc.song.patternsPerChannel) {
+			if (parsed <= Config.barCountMax) {
 				this.setPattern(parsed);
 				return;
 			}

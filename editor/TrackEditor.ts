@@ -1,5 +1,6 @@
 // Copyright (c) John Nesky and contributing authors, distributed under the MIT license, see accompanying the LICENSE.md file.
 
+import {Config} from "../synth/SynthConfig.js";
 import {ColorConfig} from "./ColorConfig.js";
 import {SongDocument} from "./SongDocument.js";
 import {ChannelRow} from "./ChannelRow.js";
@@ -134,7 +135,14 @@ export class TrackEditor {
 			if (this._doc.channel == this._mouseChannel && this._doc.bar == this._mouseBar) {
 				const up: boolean = (this._mouseY % ChannelRow.patternHeight) < ChannelRow.patternHeight / 2;
 				const patternCount: number = this._doc.song.patternsPerChannel;
-				this._doc.selection.setPattern((this._doc.song.channels[this._mouseChannel].bars[this._mouseBar] + (up ? 1 : patternCount)) % (patternCount + 1));
+				const current: number = this._doc.song.channels[this._mouseChannel].bars[this._mouseBar];
+				// Clicking up at the last pattern adds another one rather than wrapping
+				// straight back to 0, so a channel is not stuck with the eight it
+				// started with. Clicking down still wraps, which is how you reach 0.
+				const next: number = up
+					? (current >= Config.barCountMax ? 0 : current + 1)
+					: (current + patternCount) % (patternCount + 1);
+				this._doc.selection.setPattern(next);
 			}
 		}
 		this._mouseDragging = false;

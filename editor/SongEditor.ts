@@ -20,6 +20,7 @@ import {TrackEditor} from "./TrackEditor.js";
 import {ChannelRow} from "./ChannelRow.js";
 import {LayoutPrompt} from "./LayoutPrompt.js";
 import {LoopEditor} from "./LoopEditor.js";
+import {Tour} from "./Tour.js";
 import {SpectrumEditor} from "./SpectrumEditor.js";
 import {HarmonicsEditor} from "./HarmonicsEditor.js";
 import {BarScrollBar} from "./BarScrollBar.js";
@@ -453,6 +454,8 @@ export class SongEditor {
 		this._sheetMusicBar,
 	);
 	
+	private _tour: Tour | null = null;
+	private readonly _tourButton: HTMLButtonElement = button({class: "tourButton", type: "button", title: "Take a guided tour of the editor"}, "? Tour");
 	private readonly _menuArea: HTMLDivElement = div({class: "menu-area"},
 		div({class: "selectContainer menu file"},
 			this._fileMenu,
@@ -463,6 +466,7 @@ export class SongEditor {
 		div({class: "selectContainer menu preferences"},
 			this._optionsMenu,
 		),
+		this._tourButton,
 	);
 	private readonly _songSettingsArea: HTMLDivElement = div({class: "song-settings-area"},
 		div({class: "editor-controls"},
@@ -667,6 +671,7 @@ export class SongEditor {
 		this._addMeasureButton.addEventListener("click", this._whenAddMeasurePressed);
 		this._removeMeasureButton.addEventListener("click", this._whenRemoveMeasurePressed);
 		this._sheetMusicButton.addEventListener("click", this._whenSheetMusicPressed);
+		this._tourButton.addEventListener("click", this._whenTourPressed);
 		this._addInstrumentSlotButton.addEventListener("click", this._whenAddInstrumentSlotPressed);
 		this._removeInstrumentSlotButton.addEventListener("click", this._whenRemoveInstrumentSlotPressed);
 		this._zoomInButton.addEventListener("click", this._zoomIn);
@@ -841,6 +846,11 @@ export class SongEditor {
 
 	// Slots are pitch channels; the Edit menu still covers noise channels and
 	// inserting a slot anywhere other than the end.
+	private _whenTourPressed = (): void => {
+		if (this._tour == null) this._tour = new Tour(this.mainLayer);
+		this._tour.start();
+	}
+
 	private _whenSheetMusicPressed = (): void => {
 		const songString: string = this.doc.song.toBase64String();
 		// The offline build is a single file with no transpose.html beside it to

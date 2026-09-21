@@ -55,7 +55,7 @@ export class PatternEditor {
 		this._svgPreview,
 		this._svgPlayhead,
 	);
-	public readonly container: HTMLDivElement = HTML.div({style: "height: 100%; overflow:hidden; position: relative; flex-grow: 1; -webkit-user-select: none; user-select: none; -webkit-touch-callout: none;"}, this._svg);
+	public readonly container: HTMLDivElement = HTML.div({class: "patternEditorContainer", style: "height: 100%; overflow:hidden; position: relative; flex-grow: 1; -webkit-user-select: none; user-select: none; -webkit-touch-callout: none;"}, this._svg);
 	
 	private readonly _pointers: EasyPointers = new EasyPointers(this._svg, {holdStillMinMillis: 800});
 	

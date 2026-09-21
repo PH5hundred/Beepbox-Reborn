@@ -11,7 +11,7 @@ export class Piano {
 	private readonly _pianoContainer: HTMLDivElement = HTML.div({style: "width: 100%; height: 100%; display: flex; flex-direction: column-reverse; align-items: stretch;"});
 	private readonly _drumContainer: HTMLDivElement = HTML.div({style: "width: 100%; height: 100%; display: flex; flex-direction: column-reverse; align-items: stretch;"});
 	private readonly _preview: HTMLDivElement = HTML.div({style: `width: 100%; height: 40px; border: 2px solid ${ColorConfig.primaryText}; position: absolute; box-sizing: border-box; pointer-events: none;`});
-	public readonly container: HTMLDivElement = HTML.div({style: "width: 56px; height: 100%; overflow: hidden; position: relative; flex-shrink: 0; touch-action: none;"},
+	public readonly container: HTMLDivElement = HTML.div({class: "pianoContainer", style: "width: 56px; height: 100%; overflow: hidden; position: relative; flex-shrink: 0; touch-action: none;"},
 		this._pianoContainer,
 		this._drumContainer,
 		this._preview,
