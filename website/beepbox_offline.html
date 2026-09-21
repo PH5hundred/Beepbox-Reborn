@@ -1588,6 +1588,66 @@ var SheetMusic = (function () {
 		return groups;
 	}
 
+	// A note running past a barline is written as two noteheads joined by a tie,
+	// so split every chord at each barline it crosses.
+	function buildEvents(notes, partsPerBar, partsPerBeat) {
+		var chords = groupChords(notes);
+		var events = [];
+		for (var c = 0; c < chords.length; c++) {
+			var chord = chords[c];
+			var midis = [];
+			for (var i = 0; i < chord.length; i++) midis.push(chord[i].midi);
+			var pos = chord[0].start;
+			var remaining = chord[0].duration;
+			var previous = null;
+			while (remaining > 0) {
+				var barIndex = Math.floor(pos / partsPerBar);
+				var untilBarline = (barIndex + 1) * partsPerBar - pos;
+				var length = Math.min(remaining, untilBarline);
+				var ev = {
+					bar: barIndex, start: pos, duration: length, midis: midis,
+					shape: durationGlyph(length, partsPerBeat),
+					tieTo: null, tiedFrom: false,
+				};
+				if (previous !== null) { previous.tieTo = ev; ev.tiedFrom = true; }
+				events.push(ev);
+				previous = ev;
+				pos += length;
+				remaining -= length;
+			}
+		}
+		events.sort(function (a, b) { return a.start - b.start; });
+		return events;
+	}
+
+	// Flagged notes that run on from one another inside a single beat are beamed
+	// as a group rather than each carrying its own flag.
+	function beamGroups(events, partsPerBar, partsPerBeat) {
+		var groups = [], current = null;
+		for (var i = 0; i < events.length; i++) {
+			var ev = events[i];
+			var beat = Math.floor((ev.start % partsPerBar) / partsPerBeat);
+			if (ev.shape.flags > 0 && ev.tieTo === null && !ev.tiedFrom) {
+				var joins = current !== null && current.bar === ev.bar && current.beat === beat &&
+					current.last.start + current.last.duration === ev.start;
+				if (joins) {
+					current.events.push(ev);
+					current.last = ev;
+				} else {
+					current = {bar: ev.bar, beat: beat, events: [ev], last: ev};
+					groups.push(current);
+				}
+			} else {
+				current = null;
+			}
+		}
+		var out = [];
+		for (i = 0; i < groups.length; i++) {
+			if (groups[i].events.length > 1) out.push(groups[i].events);
+		}
+		return out;
+	}
+
 	// The two dots of a repeat sign, in the second and fourth spaces.
 	function repeatDots(svg, x, top, STAFF, GAP) {
 		el("circle", {cx: x, cy: top + STAFF - 3 * GAP, r: 1.8, fill: "#000"}, svg);
@@ -1684,7 +1744,8 @@ var SheetMusic = (function () {
 		glyph(svg, 8, 16, "\u2669 = " + song.tempo, 12);
 
 		var clefs = [];
-		var chords = groupChords(notes);
+		var events = buildEvents(notes, partsPerBar, partsPerBeat);
+		var beams = beamGroups(events, partsPerBar, partsPerBeat);
 
 		// Where repeat signs go. A section's end is exclusive, so its closing sign
 		// sits on the barline at song bar `start + length`. Nested sections can
@@ -1772,115 +1833,217 @@ var SheetMusic = (function () {
 				}
 			}
 
-			// notes on this line, one chord at a time. An accidental holds for the
-			// rest of its measure, so remember what has already been marked and do
-			// not print it again on every repeat of the same note.
-			var accidentalBar = -1, accidentalsSoFar = {};
-
-			for (var ci = 0; ci < chords.length; ci++) {
-				var chord = chords[ci];
-				var barOnLine = chord[0].bar - line * PER_LINE;
-				if (barOnLine < 0 || barOnLine >= barsHere) continue;
-				if (chord[0].bar !== accidentalBar) {
-					accidentalBar = chord[0].bar;
-					accidentalsSoFar = {};
-				}
-
-				var within = (chord[0].start % partsPerBar) / partsPerBar;
-				var cx = x0 + barOnLine * BAR_W + 18 + within * (BAR_W - 28);
-				var shape = durationGlyph(chord[0].duration, partsPerBeat);
-
-				var heads = [];
-				for (var hi = 0; hi < chord.length; hi++) {
-					var sp = spell(chord[hi].midi, useSharps);
-					heads.push({sp: sp, steps: sp.diatonic - bottomDiatonic});
-				}
-				heads.sort(function (a, b) { return a.steps - b.steps; });
-
-				var minSteps = heads[0].steps;
-				var maxSteps = heads[heads.length - 1].steps;
-				// The note furthest from the middle line picks the direction, and a
-				// tie goes stem-down, which is the usual convention.
-				var up = (maxSteps - 4) < (4 - minSteps);
-				var stemX = cx + (up ? 5 : -5);
-
-				// Two notes a step apart cannot both sit on the same side of the
-				// stem, so the upper one crosses over.
-				for (var h = 0; h < heads.length; h++) {
-					var prev = h > 0 ? heads[h - 1] : null;
-					heads[h].offset = !!(prev && !prev.offset && heads[h].steps - prev.steps === 1);
-					heads[h].x = cx + (heads[h].offset ? (up ? 10.8 : -10.8) : 0);
-					heads[h].y = top + STAFF - heads[h].steps * GAP;
-				}
-
-				for (h = 0; h < heads.length; h++) {
-					var head = heads[h];
-					var L;
-					for (L = -2; head.steps <= L; L -= 2) {
-						el("line", {x1: head.x - 9, y1: top + STAFF - L * GAP, x2: head.x + 9,
-							y2: top + STAFF - L * GAP, stroke: "#000", "stroke-width": 1}, svg);
-					}
-					for (L = 10; head.steps >= L; L += 2) {
-						el("line", {x1: head.x - 9, y1: top + STAFF - L * GAP, x2: head.x + 9,
-							y2: top + STAFF - L * GAP, stroke: "#000", "stroke-width": 1}, svg);
-					}
-
-					el("ellipse", {cx: head.x, cy: head.y, rx: 5.4, ry: 4,
-						fill: shape.filled ? "#000" : "none",
-						stroke: "#000", "stroke-width": shape.filled ? 0 : 1.4,
-						transform: "rotate(-20 " + head.x + " " + head.y + ")"}, svg);
-
-					// A dot belongs in a space, so one on a line rides just above it.
-					if (shape.dotted) {
-						el("circle", {cx: head.x + 10,
-							cy: head.steps % 2 === 0 ? head.y - GAP : head.y,
-							r: 1.6, fill: "#000"}, svg);
-					}
-				}
-
-				if (shape.stem) {
-					var yLow = top + STAFF - minSteps * GAP;    // lowest pitch, largest y
-					var yHigh = top + STAFF - maxSteps * GAP;
-					var y1 = up ? yLow : yHigh;
-					var y2 = up ? yHigh - 26 : yLow + 26;
-					el("line", {x1: stemX, y1: y1, x2: stemX, y2: y2,
-						stroke: "#000", "stroke-width": 1.3}, svg);
-					// Flags hang off the right of the stem either way, so a down-stem
-					// flag is the up-stem one mirrored rather than the same curve.
-					for (var fl = 0; fl < shape.flags; fl++) {
-						var fy = y2 + fl * 6 * (up ? 1 : -1);
-						el("path", {d: "M " + stemX + " " + fy + (up ? " q 9 4 7 13" : " q 9 -4 7 -13"),
-							stroke: "#000", "stroke-width": 1.3, fill: "none"}, svg);
-					}
-				}
-
-				// Accidentals stack into columns left of the chord so two of them
-				// never land on top of each other.
-				var accColumns = [];
-				for (h = heads.length - 1; h >= 0; h--) {
-					var staffSlot = heads[h].sp.diatonic;
-					var written = heads[h].sp.accidental;
-					var needed;
-					if (accidentalsSoFar.hasOwnProperty(staffSlot)) {
-						// Something already altered this line or space this measure,
-						// so a mark is needed only if this note differs from it.
-						needed = accidentalsSoFar[staffSlot] !== written;
-					} else {
-						needed = !isInKeySignature(heads[h].sp, sig);
-					}
-					if (!needed) continue;
-					accidentalsSoFar[staffSlot] = written;
-					var col = 0;
-					while (col < accColumns.length && Math.abs(accColumns[col] - heads[h].y) < GAP * 2.2) col++;
-					accColumns[col] = heads[h].y;
-					glyph(svg, heads[h].x - 14 - col * 10, heads[h].y + 5,
-						heads[h].sp.accidental === 1 ? "♯" : heads[h].sp.accidental === -1 ? "♭" : "♮", 14);
-				}
-			}
-
 			// measure numbers
 			for (var m = 0; m < barsHere; m++) {
 				glyph(svg, x0 + m * BAR_W + 2, top - 6, String(line * PER_LINE + m + 1), 9, "#888");
+			}
+		}
+
+		// --- notes, beams, ties and slurs -----------------------------------
+		// One pass over the whole part rather than one per system, because a beam
+		// or a tie has to reach between notes that a system boundary separates.
+		function topOfBar(bar) {
+			return TOP_PAD + above + Math.floor(bar / PER_LINE) * LINE_H;
+		}
+		function xOfEvent(ev) {
+			var within = (ev.start % partsPerBar) / partsPerBar;
+			return LEFT + (ev.bar % PER_LINE) * BAR_W + 18 + within * (BAR_W - 28);
+		}
+		function ledgerLine(x, top, L) {
+			el("line", {x1: x - 9, y1: top + STAFF - L * GAP, x2: x + 9,
+				y2: top + STAFF - L * GAP, stroke: "#000", "stroke-width": 1}, svg);
+		}
+
+		var ei, ev, h, k, head;
+
+		for (ei = 0; ei < events.length; ei++) {
+			ev = events[ei];
+			var heads = [];
+			for (var hi = 0; hi < ev.midis.length; hi++) {
+				var spl = spell(ev.midis[hi], useSharps);
+				heads.push({sp: spl, steps: spl.diatonic - bottomDiatonic});
+			}
+			heads.sort(function (a, b) { return a.steps - b.steps; });
+			ev.heads = heads;
+			ev.minSteps = heads[0].steps;
+			ev.maxSteps = heads[heads.length - 1].steps;
+			ev.cx = xOfEvent(ev);
+			ev.top = topOfBar(ev.bar);
+		}
+
+		// A beamed group points all its stems the same way, so the direction has to
+		// be settled for the group before any of its notes can be positioned.
+		for (var gi = 0; gi < beams.length; gi++) {
+			var group = beams[gi];
+			var sum = 0;
+			for (k = 0; k < group.length; k++) sum += (group[k].minSteps + group[k].maxSteps) / 2;
+			var groupUp = (sum / group.length) < 4;
+			for (k = 0; k < group.length; k++) {
+				group[k].beamed = true;
+				group[k].up = groupUp;
+			}
+		}
+
+		for (ei = 0; ei < events.length; ei++) {
+			ev = events[ei];
+			if (ev.up === undefined) ev.up = (ev.maxSteps - 4) < (4 - ev.minSteps);
+			ev.stemX = ev.cx + (ev.up ? 5 : -5);
+			for (h = 0; h < ev.heads.length; h++) {
+				var previousHead = h > 0 ? ev.heads[h - 1] : null;
+				ev.heads[h].offset = !!(previousHead && !previousHead.offset &&
+					ev.heads[h].steps - previousHead.steps === 1);
+				ev.heads[h].x = ev.cx + (ev.heads[h].offset ? (ev.up ? 10.8 : -10.8) : 0);
+				ev.heads[h].y = ev.top + STAFF - ev.heads[h].steps * GAP;
+			}
+			ev.yLow = ev.top + STAFF - ev.minSteps * GAP;
+			ev.yHigh = ev.top + STAFF - ev.maxSteps * GAP;
+		}
+
+		// Ties and slurs first, so the curves pass behind the noteheads.
+		for (ei = 0; ei < events.length; ei++) {
+			ev = events[ei];
+			if (ev.tieTo === null || ev.tieTo.top !== ev.top) continue;
+			// A tie joins the same pitch, so it arcs from notehead to notehead on
+			// the side away from the stems.
+			var tieUp = !ev.up;
+			var ya = tieUp ? ev.yHigh - 7 : ev.yLow + 7;
+			var xa = ev.cx + 7, xb = ev.tieTo.cx - 7;
+			if (xb - xa < 6) xb = xa + 6;
+			el("path", {d: "M " + xa + " " + ya + " Q " + ((xa + xb) / 2) + " " +
+				(ya + (tieUp ? -7 : 7)) + " " + xb + " " + ya,
+				stroke: "#000", "stroke-width": 1.1, fill: "none"}, svg);
+		}
+
+		// A run of notes that touch with nothing between them is one legato
+		// phrase. Ties break a run, since a tie already says "same note held".
+		var runStart = 0;
+		for (ei = 0; ei <= events.length; ei++) {
+			var breaks = ei === events.length;
+			if (!breaks) {
+				var prev = events[ei - 1];
+				// Kept inside one measure: a legato line can run the whole system,
+				// and a single curve stretched over four bars reads as a mistake
+				// rather than as phrasing.
+				breaks = ei === 0 || prev.top !== events[ei].top ||
+					prev.bar !== events[ei].bar ||
+					prev.start + prev.duration !== events[ei].start ||
+					prev.tieTo !== null || events[ei].tiedFrom;
+			}
+			if (breaks && ei - runStart > 1) {
+				var first = events[runStart], last = events[ei - 1];
+				var allSame = true;
+				for (k = runStart + 1; k < ei; k++) {
+					if (events[k].maxSteps !== first.maxSteps) { allSame = false; break; }
+				}
+				if (!allSame) {
+					var slurUp = !first.up;
+					var topmost = slurUp ? Infinity : -Infinity;
+					for (k = runStart; k < ei; k++) {
+						topmost = slurUp ? Math.min(topmost, events[k].yHigh)
+						                 : Math.max(topmost, events[k].yLow);
+					}
+					var sy = topmost + (slurUp ? -12 : 12);
+					el("path", {d: "M " + (first.cx) + " " + (slurUp ? first.yHigh - 9 : first.yLow + 9) +
+						" Q " + ((first.cx + last.cx) / 2) + " " + (sy + (slurUp ? -6 : 6)) +
+						" " + (last.cx) + " " + (slurUp ? last.yHigh - 9 : last.yLow + 9),
+						stroke: "#000", "stroke-width": 1.1, fill: "none"}, svg);
+				}
+			}
+			if (breaks) runStart = ei;
+		}
+
+		// Noteheads, ledger lines, dots and accidentals. An accidental holds for
+		// the rest of its measure, so it is printed once and then remembered.
+		var accidentalBar = -1, accidentalsSoFar = {};
+		for (ei = 0; ei < events.length; ei++) {
+			ev = events[ei];
+			if (ev.bar !== accidentalBar) { accidentalBar = ev.bar; accidentalsSoFar = {}; }
+			var shape = ev.shape;
+
+			for (h = 0; h < ev.heads.length; h++) {
+				head = ev.heads[h];
+				var L;
+				for (L = -2; head.steps <= L; L -= 2) ledgerLine(head.x, ev.top, L);
+				for (L = 10; head.steps >= L; L += 2) ledgerLine(head.x, ev.top, L);
+
+				el("ellipse", {cx: head.x, cy: head.y, rx: 5.4, ry: 4,
+					fill: shape.filled ? "#000" : "none",
+					stroke: "#000", "stroke-width": shape.filled ? 0 : 1.4,
+					transform: "rotate(-20 " + head.x + " " + head.y + ")"}, svg);
+
+				// A dot belongs in a space, so one on a line rides just above it.
+				if (shape.dotted) {
+					el("circle", {cx: head.x + 10,
+						cy: head.steps % 2 === 0 ? head.y - GAP : head.y,
+						r: 1.6, fill: "#000"}, svg);
+				}
+			}
+
+			// The second half of a tie repeats the notehead but not the accidental.
+			if (ev.tiedFrom) continue;
+
+			var accColumns = [];
+			for (h = ev.heads.length - 1; h >= 0; h--) {
+				var staffSlot = ev.heads[h].sp.diatonic;
+				var written = ev.heads[h].sp.accidental;
+				var needed;
+				if (accidentalsSoFar.hasOwnProperty(staffSlot)) {
+					needed = accidentalsSoFar[staffSlot] !== written;
+				} else {
+					needed = !isInKeySignature(ev.heads[h].sp, sig);
+				}
+				if (!needed) continue;
+				accidentalsSoFar[staffSlot] = written;
+				var col = 0;
+				while (col < accColumns.length && Math.abs(accColumns[col] - ev.heads[h].y) < GAP * 2.2) col++;
+				accColumns[col] = ev.heads[h].y;
+				glyph(svg, ev.heads[h].x - 14 - col * 10, ev.heads[h].y + 5,
+					written === 1 ? "♯" : written === -1 ? "♭" : "♮", 14);
+			}
+		}
+
+		// Stems and flags for everything that is not beamed.
+		for (ei = 0; ei < events.length; ei++) {
+			ev = events[ei];
+			if (ev.beamed || !ev.shape.stem) continue;
+			var y1 = ev.up ? ev.yLow : ev.yHigh;
+			var y2 = ev.up ? ev.yHigh - 26 : ev.yLow + 26;
+			el("line", {x1: ev.stemX, y1: y1, x2: ev.stemX, y2: y2,
+				stroke: "#000", "stroke-width": 1.3}, svg);
+			// Flags hang off the right of the stem either way, so a down-stem flag
+			// is the up-stem one mirrored rather than the same curve.
+			for (var fl = 0; fl < ev.shape.flags; fl++) {
+				var fy = y2 + fl * 6 * (ev.up ? 1 : -1);
+				el("path", {d: "M " + ev.stemX + " " + fy + (ev.up ? " q 9 4 7 13" : " q 9 -4 7 -13"),
+					stroke: "#000", "stroke-width": 1.3, fill: "none"}, svg);
+			}
+		}
+
+		// Beamed groups: one shared beam, with every stem stretched to reach it.
+		for (gi = 0; gi < beams.length; gi++) {
+			group = beams[gi];
+			var up = group[0].up;
+			var beamY = up ? Infinity : -Infinity;
+			for (k = 0; k < group.length; k++) {
+				beamY = up ? Math.min(beamY, group[k].yHigh - 26)
+				           : Math.max(beamY, group[k].yLow + 26);
+			}
+			for (k = 0; k < group.length; k++) {
+				el("line", {x1: group[k].stemX, y1: up ? group[k].yLow : group[k].yHigh,
+					x2: group[k].stemX, y2: beamY, stroke: "#000", "stroke-width": 1.3}, svg);
+			}
+			var mostFlags = 0;
+			for (k = 0; k < group.length; k++) mostFlags = Math.max(mostFlags, group[k].shape.flags);
+			for (var level = 0; level < mostFlags; level++) {
+				var beamRowY = beamY + level * 5.5 * (up ? 1 : -1);
+				// A sixteenth next to an eighth only gets the beams they share.
+				for (k = 0; k < group.length - 1; k++) {
+					if (group[k].shape.flags > level && group[k + 1].shape.flags > level) {
+						el("line", {x1: group[k].stemX, y1: beamRowY,
+							x2: group[k + 1].stemX, y2: beamRowY,
+							stroke: "#000", "stroke-width": 3.2}, svg);
+					}
+				}
 			}
 		}
 
