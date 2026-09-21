@@ -131,6 +131,11 @@ USB stick or a downloads folder, with no install and no network. It is committed
 here, so you can download it from this repo and just open it. `npm run build`
 regenerates it, so expect it to show up in your diffs after a build.
 
+Because that build is a single file, the transpose / sheet music interface is
+inlined into it and opens *over* the editor rather than as its own page — there
+is no `transpose.html` next to a lone file to navigate to. Served normally, the
+same code runs as `transpose.html`, as before.
+
 **The normal way.** `website/index.html` loads the editor from a separate script,
 so opening it straight off disk will not work — it needs to be served:
 

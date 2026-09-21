@@ -26,8 +26,17 @@ npx terser \
 # Copy the bundled and minified code into the website folder
 cp -r bundle/. website/
 
-# Combine the html and js into a single file for the offline version
+# Combine the html and js into a single file for the offline version. The
+# transpose / sheet music code is inlined as well, since a single file has no
+# transpose.html next to it to navigate to.
+cat \
+	website/instruments.js \
+	website/sheetmusic.js \
+	website/transposeui.js \
+	> bundle/sheetmusic_offline.js
+
 sed \
 	-e '/INSERT_BEEPBOX_SOURCE_HERE/{r website/beepbox_editor.min.js' -e 'd' -e '}' \
+	-e '/INSERT_SHEETMUSIC_SOURCE_HERE/{r bundle/sheetmusic_offline.js' -e 'd' -e '}' \
 	website/beepbox_offline_template.html \
 	> website/beepbox_offline.html

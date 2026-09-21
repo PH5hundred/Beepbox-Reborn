@@ -4,7 +4,7 @@ import {InstrumentType, EffectType, Config, getPulseWidthRatio, effectsIncludeTr
 import {Preset, PresetCategory, EditorConfig, isMobile, isOnMac, ctrlSymbol, prettyNumber} from "./EditorConfig.js";
 import {ColorConfig, ChannelColors} from "./ColorConfig.js";
 import "./Layout.js"; // Imported here for the sake of ensuring this code is transpiled early.
-import {Instrument, Channel, Synth} from "../synth/synth.js";
+import {Instrument, Channel, Song, Synth} from "../synth/synth.js";
 import {HTML} from "imperative-html/dist/esm/elements-strict.js";
 import {EasyPointers, getElementDimensions} from "./EasyPointers.js";
 import {Preferences} from "./Preferences.js";
@@ -842,9 +842,18 @@ export class SongEditor {
 	// Slots are pitch channels; the Edit menu still covers noise channels and
 	// inserting a slot anywhere other than the end.
 	private _whenSheetMusicPressed = (): void => {
+		const songString: string = this.doc.song.toBase64String();
+		// The offline build is a single file with no transpose.html beside it to
+		// navigate to, so there the interface is bundled in and opens over the
+		// editor instead. Served normally, it is still its own page.
+		const inPage: any = (window as any).TransposeUI;
+		if (inPage != null) {
+			inPage.openOverlay(new Song(songString));
+			return;
+		}
 		// The song travels in the URL, so the transpose page can read it straight
 		// from the hash without any shared state.
-		window.location.href = "transpose.html#" + this.doc.song.toBase64String();
+		window.location.href = "transpose.html#" + songString;
 	}
 	
 	private _whenAddInstrumentSlotPressed = (): void => {
