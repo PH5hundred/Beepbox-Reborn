@@ -20,7 +20,7 @@ import {TrackEditor} from "./TrackEditor.js";
 import {ChannelRow} from "./ChannelRow.js";
 import {LayoutPrompt} from "./LayoutPrompt.js";
 import {LoopEditor} from "./LoopEditor.js";
-import {Tour} from "./Tour.js";
+import {Tour, EDITOR_STEPS, INSTRUMENT_STEPS} from "./Tour.js";
 import {SpectrumEditor} from "./SpectrumEditor.js";
 import {HarmonicsEditor} from "./HarmonicsEditor.js";
 import {BarScrollBar} from "./BarScrollBar.js";
@@ -344,6 +344,7 @@ export class SongEditor {
 	
 	private readonly _feedbackAmplitudeSlider: Slider = new Slider(input({type: "range", min: "0", max: Config.operatorAmplitudeMax, value: "0", step: "1", title: "Feedback Amplitude"}), this.doc, (oldValue: number, newValue: number) => new ChangeFeedbackAmplitude(this.doc, oldValue, newValue));
 	private readonly _feedbackRow2: HTMLDivElement = div({class: "selectRow"}, span({class: "tip", onclick: ()=>this._openPrompt("feedbackVolume")}, "Fdback Vol:"), this._feedbackAmplitudeSlider.container);
+	private readonly _instrumentTourButton: HTMLButtonElement = button({class: "instrumentTourButton", type: "button", title: "Explain the instrument settings", style: "width: auto; height: auto; padding: 0 5px; font-size: 11px; line-height: 1.5;"}, "?");
 	private readonly _customizeInstrumentButton: HTMLButtonElement = button({type: "button", class: "customize-instrument"},
 		"Customize Instrument",
 	);
@@ -392,7 +393,8 @@ export class SongEditor {
 	);
 	private readonly _instrumentSettingsGroup: HTMLDivElement = div({class: "editor-controls"},
 		div({style: `margin: 3px 0; text-align: center; color: ${ColorConfig.secondaryText};`},
-			"Instrument Settings"
+			"Instrument Settings ",
+			this._instrumentTourButton,
 		),
 		this._instrumentsButtonRow,
 		this._instrumentCopyPasteRow,
@@ -466,6 +468,7 @@ export class SongEditor {
 	);
 	
 	private _tour: Tour | null = null;
+	private _instrumentTour: Tour | null = null;
 	private readonly _tourButton: HTMLButtonElement = button({class: "tourButton", type: "button", title: "Take a guided tour of the editor"}, "? Tour");
 	private readonly _menuArea: HTMLDivElement = div({class: "menu-area"},
 		div({class: "selectContainer menu file"},
@@ -685,6 +688,7 @@ export class SongEditor {
 		this._removeMeasureButton.addEventListener("click", this._whenRemoveMeasurePressed);
 		this._sheetMusicButton.addEventListener("click", this._whenSheetMusicPressed);
 		this._tourButton.addEventListener("click", this._whenTourPressed);
+		this._instrumentTourButton.addEventListener("click", this._whenInstrumentTourPressed);
 		this._addInstrumentSlotButton.addEventListener("click", this._whenAddInstrumentSlotPressed);
 		this._removeInstrumentSlotButton.addEventListener("click", this._whenRemoveInstrumentSlotPressed);
 		this._zoomInButton.addEventListener("click", this._zoomIn);
@@ -860,8 +864,13 @@ export class SongEditor {
 	// Slots are pitch channels; the Edit menu still covers noise channels and
 	// inserting a slot anywhere other than the end.
 	private _whenTourPressed = (): void => {
-		if (this._tour == null) this._tour = new Tour(this.mainLayer);
+		if (this._tour == null) this._tour = new Tour(this.mainLayer, EDITOR_STEPS);
 		this._tour.start();
+	}
+
+	private _whenInstrumentTourPressed = (): void => {
+		if (this._instrumentTour == null) this._instrumentTour = new Tour(this.mainLayer, INSTRUMENT_STEPS);
+		this._instrumentTour.start();
 	}
 
 	private _whenSheetMusicPressed = (): void => {

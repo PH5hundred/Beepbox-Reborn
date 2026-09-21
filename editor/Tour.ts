@@ -42,7 +42,7 @@ function bySelector(selector: string): (root: HTMLElement) => HTMLElement | null
 	};
 }
 
-const STEPS: TourStep[] = [
+export const EDITOR_STEPS: TourStep[] = [
 	{
 		find: (root) => root,
 		title: "Welcome to BeepBox: Reborn",
@@ -161,7 +161,7 @@ const STEPS: TourStep[] = [
 	{
 		find: bySelector(".instrument-settings-area"),
 		title: "Instrument settings",
-		body: "Everything about the sound of the selected channel. Start from a preset, then adjust the wave, fades, filters, effects and envelopes underneath. Any label in grey is clickable and explains what that control does in detail.",
+		body: "Everything about the sound of the selected channel. Start from a preset, then adjust the wave, fades, filters, effects and envelopes underneath. Any label in grey is clickable and explains that control in detail, and the ? beside the heading runs a second tour covering these settings one by one.",
 	},
 	{
 		find: bySelector(".sheetMusicBar"),
@@ -175,8 +175,197 @@ const STEPS: TourStep[] = [
 	},
 ];
 
+export const INSTRUMENT_STEPS: TourStep[] = [
+	{
+		find: bySelector(".instrument-settings-area"),
+		title: "Instrument settings",
+		body: "Everything about the sound of the channel you have selected. What appears here changes with the instrument: press Customize to open the full set, and change Type to see the controls belonging to a different kind of synth. This tour skips anything that is not currently on screen, so run it again after switching type to hear about those controls.",
+	},
+	{
+		find: (root) => rowByLabel(root, "Instrument"),
+		title: "Instrument slots",
+		body: "A channel can hold several instruments, and each pattern picks which one it uses. That is how one part switches between, say, a staccato and a sustained sound without needing its own channel.",
+	},
+	{
+		find: (root) => rowByLabel(root, "Type"),
+		title: "Type and presets",
+		body: "Pick a ready-made preset, or one of the raw synth types at the top of the list. Presets are just a saved set of the controls below, so choosing one and then editing it is the normal way to work.",
+	},
+	{
+		find: bySelector(".customize-instrument"),
+		title: "Customize",
+		body: "Opens the full set of controls for the current preset. Everything after this step is inside that panel, so if the rest of this tour looks short, press this first.",
+	},
+	{
+		find: (root) => rowByLabel(root, "Volume"),
+		title: "Instrument volume",
+		body: "How loud this instrument is across the whole song. Use this to balance parts against each other; use the per-measure volume in Song Settings for a change in one place.",
+	},
+	{
+		find: (root) => rowByLabel(root, "Panning"),
+		title: "Panning",
+		body: "Places the sound between the left and right speakers. Centre is the default; spreading parts apart makes a thick arrangement easier to hear into.",
+	},
+	{
+		find: (root) => rowByLabel(root, "Wave"),
+		title: "Wave",
+		body: "The raw shape the oscillator repeats, and the single biggest influence on the character of a chip sound. A square is hollow and clarinet-like, a sawtooth is bright and brassy, a triangle is soft and flute-like.",
+	},
+	{
+		find: (root) => rowByLabel(root, "Noise"),
+		title: "Noise",
+		body: "The kind of noise a drum or percussion channel is built from. Unlike a wave it has no pitch of its own, so what you choose here decides whether it reads as a snare, a cymbal or a hit.",
+	},
+	{
+		find: (root) => rowByLabel(root, "Fade In/Out"),
+		title: "Fade in and out",
+		body: "How quickly a note reaches full volume and how long it takes to die away after it ends. A slow fade in gives a bowed or breathy attack; a long fade out lets notes ring into each other.",
+	},
+	{
+		find: (root) => rowByLabel(root, "EQ Filter"),
+		title: "EQ filter",
+		body: "Shapes the tone of the instrument as a whole. Drag points on the graph to cut or boost a frequency range - rolling off the top makes a sound darker and more distant, cutting the bottom thins it out.",
+	},
+	{
+		find: (root) => rowByLabel(root, "Unison"),
+		title: "Unison",
+		body: "Plays a second copy of the wave slightly apart from the first. A small detune gives a thick, chorused sound; larger settings give deliberate intervals like octaves or fifths.",
+	},
+	{
+		find: (root) => rowByLabel(root, "Algorithm"),
+		title: "FM algorithm",
+		body: "How the FM operators feed into one another. An operator used as a carrier is heard directly; one used as a modulator instead bends the pitch of whatever it feeds, which is what produces FM's metallic and bell-like tones.",
+	},
+	{
+		find: (root) => rowByLabel(root, "Feedback"),
+		title: "Feedback",
+		body: "Routes an operator back into itself or into another. Small amounts add bite and edge; large amounts break the tone up into noise.",
+	},
+	{
+		find: (root) => rowByLabel(root, "Fdback Vol"),
+		title: "Feedback volume",
+		body: "How much of that feedback is applied. This is usually the fastest way to move an FM sound between mellow and harsh.",
+	},
+	{
+		find: (root) => rowByLabel(root, "Spectrum"),
+		title: "Spectrum",
+		body: "Draw the strength of each frequency band directly. This is how BeepBox's drums are built - the shape you draw is the sound, rather than a wave being filtered into one.",
+	},
+	{
+		find: (root) => rowByLabel(root, "Harmonics"),
+		title: "Harmonics",
+		body: "Draw the strength of each harmonic above the fundamental. Emphasising the odd ones gives a hollow, clarinet-like tone; a smooth run of them gives a full, string-like one.",
+	},
+	{
+		find: (root) => rowByLabel(root, "Pulse Width"),
+		title: "Pulse width",
+		body: "How lopsided a square wave is. Exactly half is the hollow classic square; pushing it narrow thins the tone out and makes it more nasal.",
+	},
+	{
+		find: (root) => rowByLabel(root, "Dynamism"),
+		title: "Supersaw dynamism",
+		body: "How much the stacked sawtooth voices drift against each other. More dynamism is a wider, more restless pad; less is tighter and more focused.",
+	},
+	{
+		find: (root) => rowByLabel(root, "Spread"),
+		title: "Supersaw spread",
+		body: "How far apart in pitch those stacked voices sit. This is the control that takes a supersaw from a single hard lead to a huge wall of sound.",
+	},
+	{
+		find: (root) => rowByLabel(root, "Saw↔Pulse"),
+		title: "Saw to pulse",
+		body: "Slides the stacked voices between sawtooth and pulse shapes, trading brightness for that hollow square character.",
+	},
+	{
+		find: (root) => rowByLabel(root, "Sustain"),
+		title: "String sustain",
+		body: "How long a plucked string keeps ringing. Short is a damped, staccato pluck; long lets the note decay naturally like an undamped guitar.",
+	},
+	{
+		find: bySelector(".effects-menu"),
+		title: "Effects",
+		body: "This menu switches effects on and off, and each one you enable adds its own controls to the list below. An effect that is off costs nothing and takes up no room, which is why this panel looks different from one instrument to the next.",
+	},
+	{
+		find: (root) => rowByLabel(root, "Transition"),
+		title: "Transition",
+		body: "What happens where one note runs into the next: whether each is struck separately, or they slide and carry over into each other. This is the difference between a tongued and a slurred line.",
+	},
+	{
+		find: (root) => rowByLabel(root, "Chords"),
+		title: "Chords",
+		body: "What to do when several notes sound at once - play them together, or arpeggiate them one after another. Older chip hardware could not play chords at all, which is why the arpeggio setting sounds so characteristic.",
+	},
+	{
+		find: (root) => rowByLabel(root, "Pitch Shift"),
+		title: "Pitch shift",
+		body: "Moves this instrument up or down by whole steps without touching the notes you wrote. Handy for doubling a part an octave away.",
+	},
+	{
+		find: (root) => rowByLabel(root, "Detune"),
+		title: "Detune",
+		body: "Nudges the tuning by a fraction of a step. A little against another instrument thickens both; a lot sounds deliberately out of tune.",
+	},
+	{
+		find: (root) => rowByLabel(root, "Vibrato"),
+		title: "Vibrato",
+		body: "A regular wobble in pitch while a note is held, the way a singer or string player sustains one. The settings differ in how fast and how deep the wobble is, and how long it waits before starting.",
+	},
+	{
+		find: (root) => rowByLabel(root, "Note Filter"),
+		title: "Note filter",
+		body: "Like the EQ filter, but applied to each note separately, which means an envelope can sweep it as the note plays. That sweep is what produces the classic filter 'wow' on a synth lead.",
+	},
+	{
+		find: (root) => rowByLabel(root, "Distortion"),
+		title: "Distortion",
+		body: "Overdrives the sound, adding grit and harmonics. A little adds edge and helps a part cut through; a lot is the sound of a fuzzed guitar.",
+	},
+	{
+		find: (root) => rowByLabel(root, "Bit Crush"),
+		title: "Bit crush",
+		body: "Throws away resolution, coarsening the sound into something rougher and more digital - the sound of cheap old hardware, on purpose.",
+	},
+	{
+		find: (root) => rowByLabel(root, "Freq Crush"),
+		title: "Frequency crush",
+		body: "Lowers the sample rate rather than the resolution, which adds a harsh metallic ring on top. Paired with bit crush it is the core of a lo-fi sound.",
+	},
+	{
+		find: (root) => rowByLabel(root, "Chorus"),
+		title: "Chorus",
+		body: "Layers slightly delayed and detuned copies of the sound, so one instrument sounds like several playing together. It widens a part without making it louder.",
+	},
+	{
+		find: (root) => rowByLabel(root, "Echo"),
+		title: "Echo",
+		body: "Repeats the sound after a delay, each repeat quieter than the last. This control sets how much of each repeat feeds back, so how long the echoes take to die away.",
+	},
+	{
+		find: (root) => rowByLabel(root, "Echo Delay"),
+		title: "Echo delay",
+		body: "How long the gap between repeats is. Matching it to the tempo makes the echoes fall on the beat instead of blurring across it.",
+	},
+	{
+		find: (root) => rowByLabel(root, "Reverb"),
+		title: "Reverb",
+		body: "The sense of a room around the sound. A little puts the instrument in a space rather than flat against your ear; a lot puts it in a hall and pushes it into the distance.",
+	},
+	{
+		find: bySelector(".envelopeEditor"),
+		title: "Envelopes",
+		body: "An envelope makes a control move on its own over the life of a note instead of staying put. Point one at a filter and it sweeps; at volume and the note swells or plucks. This is what separates a sound that is alive from one that just sits there.",
+	},
+	{
+		find: bySelector(".instrumentTourButton"),
+		title: "That's the instrument tour",
+		body: "Anything skipped was not on screen for this instrument. Switch Type, press Customize, or turn on an effect, then run this again to hear about those controls.",
+	},
+];
+
 export class Tour {
 	private readonly _root: HTMLElement;
+	private readonly _steps: TourStep[];
 	private _index: number = 0;
 	private _overlay: HTMLDivElement | null = null;
 	private _resolvedSteps: {step: TourStep, target: HTMLElement}[] = [];
@@ -205,8 +394,9 @@ export class Tour {
 		),
 	);
 
-	constructor(root: HTMLElement) {
+	constructor(root: HTMLElement, steps: TourStep[]) {
 		this._root = root;
+		this._steps = steps;
 		this._backButton.addEventListener("click", () => this._go(this._index - 1));
 		this._nextButton.addEventListener("click", () => this._go(this._index + 1));
 		this._skipButton.addEventListener("click", () => this.stop());
@@ -219,7 +409,7 @@ export class Tour {
 		// Steps whose target is missing or collapsed are dropped up front, so the
 		// "step 4 of 20" count matches what the user will actually be shown.
 		this._resolvedSteps = [];
-		for (const step of STEPS) {
+		for (const step of this._steps) {
 			const target: HTMLElement | null = step.find(this._root);
 			if (target == null) continue;
 			if (target.offsetWidth == 0 && target.offsetHeight == 0) continue;
