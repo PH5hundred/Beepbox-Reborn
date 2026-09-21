@@ -163,8 +163,8 @@ const enum SongTagCode {
 	feedbackEnvelope    = CharCode.V, // added in BeepBox URL version 6, DEPRECATED
 	pulseWidth          = CharCode.W, // added in BeepBox URL version 7
 //	                    = CharCode.X, // added in JummBox URL version 4 for aliases, DEPRECATED
-//	                    = CharCode.Y,
-//	                    = CharCode.Z,
+	masterVolume        = CharCode.Y, // added in Beepbox Reborn for the song-wide volume
+	barVolumes          = CharCode.Z, // added in Beepbox Reborn for per-measure volume
 //	                    = CharCode.NUM_0,
 //	                    = CharCode.NUM_1,
 //	                    = CharCode.NUM_2,
@@ -1782,6 +1782,9 @@ export class Channel {
 	public readonly patterns: Pattern[] = [];
 	public readonly bars: number[] = [];
 	public muted: boolean = false;
+	// One entry per measure, on Config.measureVolumeMax's scale. Empty, or any
+	// bar left at the maximum, means "unchanged" and costs nothing in the URL.
+	public readonly barVolumes: number[] = [];
 }
 
 export class Song {
@@ -1802,6 +1805,7 @@ export class Song {
 	public loopStart: number;
 	public loopLength: number;
 	public repeatSections: RepeatSection[] = [];
+	public masterVolume: number = Config.measureVolumeMax;
 	public pitchChannelCount: number;
 	public noiseChannelCount: number;
 	public readonly channels: Channel[] = [];
@@ -1816,6 +1820,40 @@ export class Song {
 	
 	public getChannelCount(): number {
 		return this.pitchChannelCount + this.noiseChannelCount;
+	}
+	
+	// Per-measure volume. An absent entry means the maximum, so a song only pays
+	// for the measures it actually changes.
+	public getBarVolume(channelIndex: number, bar: number): number {
+		const value: number = this.channels[channelIndex].barVolumes[bar];
+		return (value == undefined) ? Config.measureVolumeMax : value;
+	}
+	
+	public setBarVolume(channelIndex: number, bar: number, value: number): void {
+		const volumes: number[] = this.channels[channelIndex].barVolumes;
+		while (volumes.length < bar) volumes.push(Config.measureVolumeMax);
+		volumes[bar] = clamp(0, Config.measureVolumeMax + 1, value);
+	}
+	
+	public hasBarVolumes(): boolean {
+		for (let channelIndex: number = 0; channelIndex < this.getChannelCount(); channelIndex++) {
+			for (let bar: number = 0; bar < this.barCount; bar++) {
+				if (this.getBarVolume(channelIndex, bar) != Config.measureVolumeMax) return true;
+			}
+		}
+		return false;
+	}
+	
+	// Unity gain at the top of the scale and silence at the bottom, on the same
+	// logarithmic spacing the instrument volumes already use.
+	public static volumeStepToMult(step: number): number {
+		if (step <= 0) return 0.0;
+		return Math.pow(2, Config.volumeLogScale * (Config.measureVolumeMax - step));
+	}
+	
+	public getBarVolumeMult(channelIndex: number, bar: number): number {
+		return Song.volumeStepToMult(this.getBarVolume(channelIndex, bar)) *
+			Song.volumeStepToMult(this.masterVolume);
 	}
 	
 	public getMaxInstrumentsPerChannel(): number {
@@ -1847,6 +1885,7 @@ export class Song {
 		this.loopStart = 0;
 		this.loopLength = 4;
 		this.repeatSections.length = 0;
+		this.masterVolume = Config.measureVolumeMax;
 		this.tempo = 150;
 		this.beatsPerBar = 8;
 		this.beatUnit = Config.beatUnitDefault;
@@ -1917,6 +1956,12 @@ export class Song {
 				buffer.push(base64IntToCharCode[section.repeatCount - 1]);
 			}
 		}
+		// Both volume tags are omitted while they sit at the maximum, which is
+		// unity gain, so a song that never touches them is byte-for-byte what it
+		// was before and still reads in upstream BeepBox.
+		if (this.masterVolume != Config.measureVolumeMax) {
+			buffer.push(SongTagCode.masterVolume, base64IntToCharCode[this.masterVolume]);
+		}
 		buffer.push(SongTagCode.tempo, base64IntToCharCode[this.tempo >> 6], base64IntToCharCode[this.tempo & 63]);
 		buffer.push(SongTagCode.beatCount, base64IntToCharCode[this.beatsPerBar - 1]);
 		// Omitted when it is the usual quarter-note beat, so ordinary songs
@@ -1926,6 +1971,14 @@ export class Song {
 		}
 		buffer.push(SongTagCode.barCount, base64IntToCharCode[(this.barCount - 1) >> 6], base64IntToCharCode[(this.barCount - 1) & 0x3f]);
 		buffer.push(SongTagCode.patternCount, base64IntToCharCode[(this.patternsPerChannel - 1) >> 6], base64IntToCharCode[(this.patternsPerChannel - 1) & 0x3f]);
+		if (this.hasBarVolumes()) {
+			buffer.push(SongTagCode.barVolumes);
+			for (let channelIndex: number = 0; channelIndex < this.getChannelCount(); channelIndex++) {
+				for (let bar: number = 0; bar < this.barCount; bar++) {
+					buffer.push(base64IntToCharCode[this.getBarVolume(channelIndex, bar)]);
+				}
+			}
+		}
 		buffer.push(SongTagCode.rhythm, base64IntToCharCode[this.rhythm]);
 		
 		buffer.push(SongTagCode.instrumentCount, base64IntToCharCode[(<any>this.layeredInstruments << 1) | <any>this.patternInstruments]);
@@ -2339,6 +2392,18 @@ export class Song {
 					this.loopLength = base64CharCodeToInt[compressed.charCodeAt(charIndex++)];
 				} else {
 					this.loopLength = (base64CharCodeToInt[compressed.charCodeAt(charIndex++)] << 6) + base64CharCodeToInt[compressed.charCodeAt(charIndex++)] + 1;
+				}
+			} break;
+			case SongTagCode.masterVolume: {
+				this.masterVolume = clamp(0, Config.measureVolumeMax + 1, base64CharCodeToInt[compressed.charCodeAt(charIndex++)]);
+			} break;
+			case SongTagCode.barVolumes: {
+				for (let channelIndex: number = 0; channelIndex < this.getChannelCount(); channelIndex++) {
+					const volumes: number[] = this.channels[channelIndex].barVolumes;
+					volumes.length = 0;
+					for (let bar: number = 0; bar < this.barCount; bar++) {
+						volumes.push(clamp(0, Config.measureVolumeMax + 1, base64CharCodeToInt[compressed.charCodeAt(charIndex++)]));
+					}
 				}
 			} break;
 			case SongTagCode.repeatSections: {
@@ -4103,6 +4168,7 @@ class Tone {
 }
 
 class InstrumentState {
+	public channelIndex: number = 0;
 	public awake: boolean = false; // Whether the instrument's effects-processing loop should continue.
 	public computed: boolean = false; // Whether the effects-processing parameters are up-to-date for the current synth run.
 	public tonesAddedInThisTick: boolean = false; // Whether any instrument tones are currently active.
@@ -4424,7 +4490,13 @@ class InstrumentState {
 		this.eqFilterCount = eqFilterSettings.controlPointCount;
 		eqFilterVolume = Math.min(3.0, eqFilterVolume);
 		
-		const mainInstrumentVolume: number = Synth.instrumentVolumeToVolumeMult(instrument.volume);
+		// The instrument's own volume, then the volume set for the measure being
+		// played, then the song's master volume. All three default to unity, so a
+		// song that sets none of them sounds exactly as it did before.
+		let mainInstrumentVolume: number = Synth.instrumentVolumeToVolumeMult(instrument.volume);
+		if (synth.song != null) {
+			mainInstrumentVolume *= synth.song.getBarVolumeMult(this.channelIndex, synth.getPlayingBar());
+		}
 		this.mixVolume = mainInstrumentVolume /** envelopeStarts[InstrumentAutomationIndex.mixVolume]*/;
 		const mixVolumeEnd  = mainInstrumentVolume /** envelopeEnds[  InstrumentAutomationIndex.mixVolume]*/;
 		this.mixVolumeDelta = (mixVolumeEnd - this.mixVolume) / roundedSamplesPerTick;
@@ -4662,6 +4734,7 @@ export class Synth {
 				channelState.instruments[j] = new InstrumentState();
 			}
 			channelState.instruments.length = channel.instruments.length;
+			for (const instrumentState of channelState.instruments) instrumentState.channelIndex = i;
 			
 			if (channelState.muted != channel.muted) {
 				channelState.muted = channel.muted;
@@ -4724,6 +4797,8 @@ export class Synth {
 	
 	private playheadInternal: number = 0.0;
 	private bar: number = 0;
+	// Read-only view of the measure being played, for the per-measure volume.
+	public getPlayingBar(): number { return this.bar; }
 	private prevBar: number | null = null;
 	private nextBar: number | null = null;
 	private beat: number = 0;

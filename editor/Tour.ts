@@ -99,6 +99,16 @@ const STEPS: TourStep[] = [
 		body: "Speed in beats per minute, by slider or by typing an exact number. The sheet music page prints whatever is set here.",
 	},
 	{
+		find: (root) => rowByLabel(root, "Master vol"),
+		title: "Master volume",
+		body: "The volume of the whole song, saved with it. This is different from the volume slider by the play button, which only changes what you hear and is not part of the song.",
+	},
+	{
+		find: bySelector(".measureVolumeRow"),
+		title: "Measure volume",
+		body: "The volume of one measure of one instrument. It follows whichever measure is selected in the track, so click a box and then drag this. That is how you write a swell or drop one part back under another, and the sheet music prints it as a dynamic marking - mf, f, ff and so on - wherever it changes.",
+	},
+	{
 		find: (root) => rowByLabel(root, "Rhythm"),
 		title: "Rhythm",
 		body: "How finely the note grid is divided, and what notes snap to. Straight divisions give you eighths and sixteenths; the triplet settings swing the grid instead.",

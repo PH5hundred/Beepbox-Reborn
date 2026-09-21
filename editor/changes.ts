@@ -2597,6 +2597,27 @@ export function removeDuplicatePatterns(channels: Channel[]): void {
 	}
 }
 
+export class ChangeMasterVolume extends Change {
+	constructor(doc: SongDocument, oldValue: number, newValue: number) {
+		super();
+		doc.song.masterVolume = Math.max(0, Math.min(Config.measureVolumeMax, Math.round(newValue)));
+		doc.notifier.changed();
+		if (oldValue != newValue) this._didSomething();
+	}
+}
+
+// The volume of one measure of one channel. The bar and channel are captured
+// when the slider is grabbed, so dragging keeps editing the measure you started
+// on even if the selection moves underneath.
+export class ChangeMeasureVolume extends Change {
+	constructor(doc: SongDocument, channelIndex: number, bar: number, oldValue: number, newValue: number) {
+		super();
+		doc.song.setBarVolume(channelIndex, bar, Math.max(0, Math.min(Config.measureVolumeMax, Math.round(newValue))));
+		doc.notifier.changed();
+		if (oldValue != newValue) this._didSomething();
+	}
+}
+
 export class ChangeTempo extends Change {
 	constructor(doc: SongDocument, oldValue: number, newValue: number) {
 		super();

@@ -37,7 +37,7 @@ import {ImportPrompt} from "./ImportPrompt.js";
 import {SongRecoveryPrompt} from "./SongRecoveryPrompt.js";
 import {RecordingSetupPrompt} from "./RecordingSetupPrompt.js";
 import {Change} from "./Change.js";
-import {ChangeTempo, ChangeChorus, ChangeEchoDelay, ChangeEchoSustain, ChangeReverb, ChangeVolume, ChangePan, ChangePatternSelection, ChangeSupersawDynamism, ChangeSupersawSpread, ChangeSupersawShape, ChangePulseWidth, ChangeFeedbackAmplitude, ChangeOperatorAmplitude, ChangeOperatorFrequency, ChangeDrumsetEnvelope, ChangePasteInstrument, ChangePreset, pickRandomPresetValue, ChangeRandomGeneratedInstrument, ChangeScale, ChangeDetectKey, ChangeKey, ChangeRhythm, ChangeFeedbackType, ChangeAlgorithm, ChangeCustomizeInstrument, ChangeChipWave, ChangeNoiseWave, ChangeTransition, ChangeToggleEffects, ChangeVibrato, ChangeUnison, ChangeChord, ChangeSong, ChangePitchShift, ChangeDetune, ChangeDistortion, ChangeStringSustain, ChangeBitcrusherFreq, ChangeBitcrusherQuantization, ChangeAddEnvelope, ChangeAddChannelInstrument, ChangeRemoveChannelInstrument, ChangeBarCount, ChangeDeleteBars, ChangeAddChannel, ChangeRemoveChannel, ChangeBeatUnit, ChangeBeatsPerBar} from "./changes.js";
+import {ChangeTempo, ChangeChorus, ChangeEchoDelay, ChangeEchoSustain, ChangeReverb, ChangeVolume, ChangePan, ChangePatternSelection, ChangeSupersawDynamism, ChangeSupersawSpread, ChangeSupersawShape, ChangePulseWidth, ChangeFeedbackAmplitude, ChangeOperatorAmplitude, ChangeOperatorFrequency, ChangeDrumsetEnvelope, ChangePasteInstrument, ChangePreset, pickRandomPresetValue, ChangeRandomGeneratedInstrument, ChangeScale, ChangeDetectKey, ChangeKey, ChangeRhythm, ChangeFeedbackType, ChangeAlgorithm, ChangeCustomizeInstrument, ChangeChipWave, ChangeNoiseWave, ChangeTransition, ChangeToggleEffects, ChangeVibrato, ChangeUnison, ChangeChord, ChangeSong, ChangePitchShift, ChangeDetune, ChangeDistortion, ChangeStringSustain, ChangeBitcrusherFreq, ChangeBitcrusherQuantization, ChangeAddEnvelope, ChangeAddChannelInstrument, ChangeRemoveChannelInstrument, ChangeBarCount, ChangeDeleteBars, ChangeAddChannel, ChangeRemoveChannel, ChangeBeatUnit, ChangeBeatsPerBar, ChangeMasterVolume, ChangeMeasureVolume} from "./changes.js";
 
 const {a, button, div, input, select, span, optgroup, option} = HTML;
 
@@ -252,6 +252,17 @@ export class SongEditor {
 	private readonly _scaleSelect: HTMLSelectElement = buildOptions(select(), Config.scales.map(scale=>scale.name));
 	private readonly _keySelect: HTMLSelectElement = buildOptions(select(), Config.keys.map(key=>"Concert " + key.name).reverse());
 	private readonly _tempoSlider: Slider = new Slider(input({style: "margin: 0; width: 4em; flex-grow: 1; vertical-align: middle;", type: "range", min: "0", max: "14", value: "7", step: "1"}), this.doc, (oldValue: number, newValue: number) => new ChangeTempo(this.doc, oldValue, Math.round(120.0 * Math.pow(2.0, (-4.0 + newValue) / 9.0))));
+	private readonly _masterVolumeSlider: Slider = new Slider(input({style: "margin: 0; width: 4em; flex-grow: 1; vertical-align: middle;", type: "range", min: "0", max: String(Config.measureVolumeMax), value: String(Config.measureVolumeMax), step: "1"}), this.doc, (oldValue: number, newValue: number) => new ChangeMasterVolume(this.doc, oldValue, newValue));
+	private readonly _measureVolumeSlider: Slider = new Slider(input({style: "margin: 0; width: 4em; flex-grow: 1; vertical-align: middle;", type: "range", min: "0", max: String(Config.measureVolumeMax), value: String(Config.measureVolumeMax), step: "1"}), this.doc, (oldValue: number, newValue: number) => new ChangeMeasureVolume(this.doc, this.doc.channel, this.doc.bar, oldValue, newValue));
+	private readonly _measureVolumeLabel: HTMLSpanElement = span({class: "tip", onclick: ()=>this._openPrompt("instrumentVolume")}, "Measure vol:");
+	private readonly _masterVolumeRow: HTMLDivElement = div({class: "selectRow"},
+		span({class: "tip", onclick: ()=>this._openPrompt("instrumentVolume")}, "Master vol:"),
+		this._masterVolumeSlider.container,
+	);
+	private readonly _measureVolumeRow: HTMLDivElement = div({class: "selectRow measureVolumeRow"},
+		this._measureVolumeLabel,
+		this._measureVolumeSlider.container,
+	);
 	private readonly _tempoStepper: HTMLInputElement = input({style: "width: 3em; margin-left: 0.4em; vertical-align: middle;", type: "number", step: "1"});
 	private readonly _chorusSlider: Slider = new Slider(input({style: "margin: 0;", type: "range", min: "0", max: Config.chorusRange - 1, value: "0", step: "1"}), this.doc, (oldValue: number, newValue: number) => new ChangeChorus(this.doc, oldValue, newValue));
 	private readonly _chorusRow: HTMLDivElement = div({class: "selectRow"}, span({class: "tip", onclick: ()=>this._openPrompt("chorus")}, "Chorus:"), this._chorusSlider.container);
@@ -493,6 +504,8 @@ export class SongEditor {
 					this._tempoStepper,
 				),
 			),
+			this._masterVolumeRow,
+			this._measureVolumeRow,
 			div({class: "selectRow"},
 				span({class: "tip", onclick: ()=>this._openPrompt("rhythm")}, "Rhythm:"),
 				div({class: "selectContainer"}, this._rhythmSelect),
@@ -994,6 +1007,9 @@ export class SongEditor {
 		setSelectedValue(this._keySelect, Config.keys.length - 1 - this.doc.song.key);
 		this._tempoSlider.updateValue(Math.max(0, Math.min(28, Math.round(4.0 + 9.0 * Math.log2(this.doc.song.tempo / 120.0)))));
 		this._tempoStepper.value = this.doc.song.tempo.toString();
+		this._masterVolumeSlider.updateValue(this.doc.song.masterVolume);
+		this._measureVolumeSlider.updateValue(this.doc.song.getBarVolume(this.doc.channel, this.doc.bar));
+		this._measureVolumeLabel.textContent = "Measure " + (this.doc.bar + 1) + ":";
 		setSelectedValue(this._rhythmSelect, this.doc.song.rhythm);
 		
 		if (this.doc.song.getChannelIsNoise(this.doc.channel)) {

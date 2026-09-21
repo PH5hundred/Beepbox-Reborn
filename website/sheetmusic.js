@@ -33,6 +33,9 @@ var SheetMusic = (function () {
 		6:  {type: 1, count: 6}, 5:  {type: -1, count: 1}, 10: {type: -1, count: 2},
 		3:  {type: -1, count: 3}, 8:  {type: -1, count: 4}, 1:  {type: -1, count: 5},
 	};
+	// Indexed by the stored volume step; the top of the scale is unity gain.
+	var DYNAMIC_NAMES = ["niente", "pppp", "ppp", "pp", "p", "mp", "mf", "f", "ff"];
+
 	var SHARP_ORDER = [3, 0, 4, 1, 5, 2, 6];   // F C G D A E B
 	var FLAT_ORDER  = [6, 2, 5, 1, 4, 0, 3];   // B E A D G C F
 
@@ -233,6 +236,21 @@ var SheetMusic = (function () {
 		// diatonic index of the bottom staff line: E4 for treble, G2 for bass
 		var bottomDiatonic = treble ? spell(64, useSharps).diatonic : spell(43, useSharps).diatonic;
 
+		// Dynamics come from the per-measure volume, and are printed only where
+		// they change - a mark on every bar is not how dynamics are written, and
+		// a song that never sets one gets none at all.
+		var dynamics = [];
+		if (typeof song.hasBarVolumes === "function" && song.hasBarVolumes()) {
+			var previousStep = -1;
+			for (var dBar = 0; dBar < song.barCount; dBar++) {
+				var step = song.getBarVolume(channelIndex, dBar);
+				if (step !== previousStep) {
+					dynamics.push({bar: dBar, text: DYNAMIC_NAMES[step] || ""});
+					previousStep = step;
+				}
+			}
+		}
+
 		// geometry
 		var GAP = 7;                          // half a staff space
 		var STAFF = GAP * 8;                  // four spaces
@@ -253,6 +271,7 @@ var SheetMusic = (function () {
 		var REACH = 34;                       // stem plus a flag or two
 		var above = Math.max(16, (Math.max(0, highSteps - 8)) * GAP + REACH);
 		var below = Math.max(12, (Math.max(0, -lowSteps)) * GAP + REACH);
+		if (dynamics.length > 0) below += 16;   // a band under the staff for them
 		var SYSTEM_GAP = 16;
 		var TOP_PAD = 26;                     // tempo mark and measure numbers
 		var LINE_H = above + STAFF + below + SYSTEM_GAP;
@@ -353,6 +372,16 @@ var SheetMusic = (function () {
 						stroke: "#000", "stroke-width": 1}, svg);
 					repeatDots(svg, bx + 8, top, STAFF, GAP);
 				}
+			}
+
+			// dynamics, under the measure they take effect in
+			for (var dy = 0; dy < dynamics.length; dy++) {
+				var dOnLine = dynamics[dy].bar - line * PER_LINE;
+				if (dOnLine < 0 || dOnLine >= barsHere) continue;
+				var dNode = glyph(svg, x0 + dOnLine * BAR_W + 6, top + STAFF + below - 6,
+					dynamics[dy].text, 13);
+				dNode.setAttribute("font-style", "italic");
+				dNode.setAttribute("font-weight", "bold");
 			}
 
 			// measure numbers

@@ -363,6 +363,9 @@ export class Config {
 	public static readonly effectOrder: ReadonlyArray<EffectType> = [EffectType.transition, EffectType.chord, EffectType.pitchShift, EffectType.detune, EffectType.vibrato, EffectType.noteFilter, EffectType.distortion, EffectType.bitcrusher, EffectType.panning, EffectType.chorus, EffectType.echo, EffectType.reverb];
 	public static readonly noteSizeMax: number = 3;
 	public static readonly volumeRange: number = 8;
+	// Master and per-measure volume, on a scale where the maximum is unity gain so
+	// that a song which never touches them sounds exactly as it did before.
+	public static readonly measureVolumeMax: number = 8;
 	public static readonly volumeLogScale: number = -0.5;
 	public static readonly panCenter: number = 4;
 	public static readonly panMax: number = Config.panCenter * 2;
