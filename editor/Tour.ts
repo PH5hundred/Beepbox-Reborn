@@ -207,6 +207,11 @@ export const INSTRUMENT_STEPS: TourStep[] = [
 		body: "Places the sound between the left and right speakers. Centre is the default; spreading parts apart makes a thick arrangement easier to hear into.",
 	},
 	{
+		find: (root) => rowByLabel(root, "Reverb"),
+		title: "Reverb",
+		body: "The sense of a room around the sound. A little puts the instrument in a space rather than flat against your ear; a lot puts it in a hall and pushes it into the distance.",
+	},
+	{
 		find: (root) => rowByLabel(root, "Wave"),
 		title: "Wave",
 		body: "The raw shape the oscillator repeats, and the single biggest influence on the character of a chip sound. A square is hollow and clarinet-like, a sawtooth is bright and brassy, a triangle is soft and flute-like.",
@@ -345,11 +350,6 @@ export const INSTRUMENT_STEPS: TourStep[] = [
 		find: (root) => rowByLabel(root, "Echo Delay"),
 		title: "Echo delay",
 		body: "How long the gap between repeats is. Matching it to the tempo makes the echoes fall on the beat instead of blurring across it.",
-	},
-	{
-		find: (root) => rowByLabel(root, "Reverb"),
-		title: "Reverb",
-		body: "The sense of a room around the sound. A little puts the instrument in a space rather than flat against your ear; a lot puts it in a hall and pushes it into the distance.",
 	},
 	{
 		find: bySelector(".envelopeEditor"),

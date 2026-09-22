@@ -37,7 +37,7 @@ import {ImportPrompt} from "./ImportPrompt.js";
 import {SongRecoveryPrompt} from "./SongRecoveryPrompt.js";
 import {RecordingSetupPrompt} from "./RecordingSetupPrompt.js";
 import {Change} from "./Change.js";
-import {ChangeTempo, ChangeChorus, ChangeEchoDelay, ChangeEchoSustain, ChangeReverb, ChangeVolume, ChangePan, ChangePatternSelection, ChangeSupersawDynamism, ChangeSupersawSpread, ChangeSupersawShape, ChangePulseWidth, ChangeFeedbackAmplitude, ChangeOperatorAmplitude, ChangeOperatorFrequency, ChangeDrumsetEnvelope, ChangePasteInstrument, ChangePreset, pickRandomPresetValue, ChangeRandomGeneratedInstrument, ChangeScale, ChangeDetectKey, ChangeKey, ChangeRhythm, ChangeFeedbackType, ChangeAlgorithm, ChangeCustomizeInstrument, ChangeChipWave, ChangeNoiseWave, ChangeTransition, ChangeToggleEffects, ChangeVibrato, ChangeUnison, ChangeChord, ChangeSong, ChangePitchShift, ChangeDetune, ChangeDistortion, ChangeStringSustain, ChangeBitcrusherFreq, ChangeBitcrusherQuantization, ChangeAddEnvelope, ChangeAddChannelInstrument, ChangeRemoveChannelInstrument, ChangeBarCount, ChangeDeleteBars, ChangeAddChannel, ChangeRemoveChannel, ChangeBeatUnit, ChangeBeatsPerBar, ChangeMasterVolume, ChangeMeasureVolume} from "./changes.js";
+import {ChangeTempo, ChangeChorus, ChangeEchoDelay, ChangeEchoSustain, ChangeVolume, ChangePan, ChangePatternSelection, ChangeSupersawDynamism, ChangeSupersawSpread, ChangeSupersawShape, ChangePulseWidth, ChangeFeedbackAmplitude, ChangeOperatorAmplitude, ChangeOperatorFrequency, ChangeDrumsetEnvelope, ChangePasteInstrument, ChangePreset, pickRandomPresetValue, ChangeRandomGeneratedInstrument, ChangeScale, ChangeDetectKey, ChangeKey, ChangeRhythm, ChangeFeedbackType, ChangeAlgorithm, ChangeCustomizeInstrument, ChangeChipWave, ChangeNoiseWave, ChangeTransition, ChangeToggleEffects, ChangeVibrato, ChangeUnison, ChangeChord, ChangeSong, ChangePitchShift, ChangeDetune, ChangeDistortion, ChangeStringSustain, ChangeBitcrusherFreq, ChangeBitcrusherQuantization, ChangeAddEnvelope, ChangeAddChannelInstrument, ChangeRemoveChannelInstrument, ChangeBarCount, ChangeDeleteBars, ChangeAddChannel, ChangeRemoveChannel, ChangeBeatUnit, ChangeBeatsPerBar, ChangeMasterVolume, ChangeMeasureVolume, ChangeReverbAndEnable} from "./changes.js";
 
 const {a, button, div, input, select, span, optgroup, option} = HTML;
 
@@ -266,7 +266,7 @@ export class SongEditor {
 	private readonly _tempoStepper: HTMLInputElement = input({style: "width: 3em; margin-left: 0.4em; vertical-align: middle;", type: "number", step: "1"});
 	private readonly _chorusSlider: Slider = new Slider(input({style: "margin: 0;", type: "range", min: "0", max: Config.chorusRange - 1, value: "0", step: "1"}), this.doc, (oldValue: number, newValue: number) => new ChangeChorus(this.doc, oldValue, newValue));
 	private readonly _chorusRow: HTMLDivElement = div({class: "selectRow"}, span({class: "tip", onclick: ()=>this._openPrompt("chorus")}, "Chorus:"), this._chorusSlider.container);
-	private readonly _reverbSlider: Slider = new Slider(input({style: "margin: 0;", type: "range", min: "0", max: Config.reverbRange - 1, value: "0", step: "1"}), this.doc, (oldValue: number, newValue: number) => new ChangeReverb(this.doc, oldValue, newValue));
+	private readonly _reverbSlider: Slider = new Slider(input({style: "margin: 0;", type: "range", min: "0", max: Config.reverbRange - 1, value: "0", step: "1"}), this.doc, (oldValue: number, newValue: number) => new ChangeReverbAndEnable(this.doc, oldValue, newValue));
 	private readonly _reverbRow: HTMLDivElement = div({class: "selectRow"}, span({class: "tip", onclick: ()=>this._openPrompt("reverb")}, "Reverb:"), this._reverbSlider.container);
 	private readonly _echoSustainSlider: Slider = new Slider(input({style: "margin: 0;", type: "range", min: "0", max: Config.echoSustainRange - 1, value: "0", step: "1"}), this.doc, (oldValue: number, newValue: number) => new ChangeEchoSustain(this.doc, oldValue, newValue));
 	private readonly _echoSustainRow: HTMLDivElement = div({class: "selectRow"}, span({class: "tip", onclick: ()=>this._openPrompt("echoSustain")}, "Echo:"), this._echoSustainSlider.container);
@@ -384,7 +384,6 @@ export class SongEditor {
 		this._chorusRow,
 		this._echoSustainRow,
 		this._echoDelayRow,
-		this._reverbRow,
 		div({style: `margin: 2px 0; margin-left: 2em; display: flex; align-items: center;`},
 			span({style: `flex-grow: 1; text-align: center;`}, span({class: "tip", onclick: ()=>this._openPrompt("envelopes")}, "Envelopes")),
 			this._addEnvelopeButton,
@@ -399,6 +398,7 @@ export class SongEditor {
 		this._instrumentsButtonRow,
 		this._instrumentCopyPasteRow,
 		this._instrumentVolumeSliderRow,
+		this._reverbRow,
 		div({class: "selectRow"},
 			span({class: "tip", onclick: ()=>this._openPrompt("instrumentType")}, "Type:"),
 			div({class: "selectContainer"}, this._pitchedPresetSelect, this._drumPresetSelect),
@@ -1220,12 +1220,9 @@ export class SongEditor {
 				this._echoDelayRow.style.display = "none";
 			}
 			
-			if (effectsIncludeReverb(instrument.effects)) {
-				this._reverbRow.style.display = "";
-				this._reverbSlider.updateValue(instrument.reverb);
-			} else {
-				this._reverbRow.style.display = "none";
-			}
+			// Reverb is always on screen now; it reads zero when the effect is
+			// switched off, which is what you actually hear.
+			this._reverbSlider.updateValue(effectsIncludeReverb(instrument.effects) ? instrument.reverb : 0);
 			
 			if (instrument.type == InstrumentType.chip || instrument.type == InstrumentType.harmonics || instrument.type == InstrumentType.pickedString) {
 				this._unisonSelectRow.style.display = "";

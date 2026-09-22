@@ -14,7 +14,7 @@ import {ArrayBufferReader} from "./ArrayBufferReader.js";
 const {button, p, div, h2, input} = HTML;
 
 export class ImportPrompt implements Prompt {
-	private readonly _fileInput: HTMLInputElement = input({type: "file", accept: ".json,application/json,.mid,.midi,audio/midi,audio/x-midi"});
+	private readonly _fileInput: HTMLInputElement = input({type: "file", accept: ".json,application/json,.mid,.midi,audio/midi,audio/x-midi,.html,.htm,text/html"});
 	private readonly _cancelButton: HTMLButtonElement = button({class: "cancelButton"});
 	
 	public readonly container: HTMLDivElement = div({class: "prompt noSelection", style: "width: 300px;"},
@@ -24,6 +24,9 @@ export class ImportPrompt implements Prompt {
 		),
 		p({style: "text-align: left; margin: 0.5em 0;"},
 			"BeepBox can also (crudely) import .mid files. There are many tools available for creating .mid files. Shorter and simpler songs are more likely to work well.",
+		),
+		p({style: "text-align: left; margin: 0.5em 0;"},
+			"A song exported as .html can be imported here too. That is how you move a song you saved earlier into a newer copy of the editor: those files point at whichever editor you exported them from, so opening one directly reopens that old copy.",
 		),
 		this._fileInput,
 		this._cancelButton,
@@ -67,10 +70,38 @@ export class ImportPrompt implements Prompt {
 				this._parseMidiFile(<ArrayBuffer>reader.result);
 			});
 			reader.readAsArrayBuffer(file);
+		} else if (extension == "html" || extension == "htm") {
+			const reader: FileReader = new FileReader();
+			reader.addEventListener("load", (event: Event): void => {
+				const songString: string | null = ImportPrompt.songStringFromHtml(<string>reader.result);
+				if (songString == null) {
+					console.error("No BeepBox song found in that .html file.");
+					this._close();
+					return;
+				}
+				this._doc.prompt = null;
+				this._doc.goBackToStart();
+				this._doc.record(new ChangeSong(this._doc, songString), true, true);
+			});
+			reader.readAsText(file);
 		} else {
 			console.error("Unrecognized file extension.");
 			this._close();
 		}
+	}
+	
+	// An exported .html is a redirect page holding the song in the fragment of a
+	// link, so the song can be lifted straight back out of it. The link is an
+	// absolute path to the editor it was exported from, which is why opening the
+	// file reopens that editor rather than this one.
+	public static songStringFromHtml(contents: string): string | null {
+		let best: string | null = null;
+		const pattern: RegExp = /#([0-9a-zA-Z_\-]{20,})/g;
+		let match: RegExpExecArray | null;
+		while ((match = pattern.exec(contents)) != null) {
+			if (best == null || match[1].length > best.length) best = match[1];
+		}
+		return best;
 	}
 	
 	private _parseMidiFile(buffer: ArrayBuffer): void {

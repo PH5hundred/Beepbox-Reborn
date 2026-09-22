@@ -1,6 +1,6 @@
 // Copyright (c) John Nesky and contributing authors, distributed under the MIT license, see accompanying the LICENSE.md file.
 
-import {Algorithm, Dictionary, FilterType, SustainType, InstrumentType, EffectType, AutomationTarget, Config, effectsIncludePanning, effectsIncludeDistortion} from "../synth/SynthConfig.js";
+import {Algorithm, Dictionary, FilterType, SustainType, InstrumentType, EffectType, AutomationTarget, Config, effectsIncludePanning, effectsIncludeDistortion, effectsIncludeReverb} from "../synth/SynthConfig.js";
 import {NotePin, Note, makeNotePin, Pattern, FilterSettings, FilterControlPoint, SpectrumWave, HarmonicsWave, Instrument, Channel, Song, Synth, RepeatSection, sanitizeRepeatSections} from "../synth/synth.js";
 import {Preset, PresetCategory, EditorConfig} from "./EditorConfig.js";
 import {Change, ChangeGroup, ChangeSequence, UndoableChange} from "./Change.js";
@@ -2649,6 +2649,25 @@ export class ChangeChorus extends ChangeInstrumentSlider {
 	constructor(doc: SongDocument, oldValue: number, newValue: number) {
 		super(doc);
 		this._instrument.chorus = newValue;
+		doc.notifier.changed();
+		if (oldValue != newValue) this._didSomething();
+	}
+}
+
+// Reverb lives in the always-visible part of the instrument panel, so raising
+// it from nothing switches the effect on rather than making you find the
+// effects menu first, and dropping it back to nothing switches it off again.
+export class ChangeReverbAndEnable extends ChangeInstrumentSlider {
+	constructor(doc: SongDocument, oldValue: number, newValue: number) {
+		super(doc);
+		const enabled: boolean = effectsIncludeReverb(this._instrument.effects);
+		if (newValue > 0 && !enabled) {
+			this._instrument.effects |= 1 << EffectType.reverb;
+		} else if (newValue <= 0 && enabled) {
+			this._instrument.effects &= ~(1 << EffectType.reverb);
+			this._instrument.clearInvalidEnvelopeTargets();
+		}
+		this._instrument.reverb = newValue;
 		doc.notifier.changed();
 		if (oldValue != newValue) this._didSomething();
 	}

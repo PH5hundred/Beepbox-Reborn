@@ -789,6 +789,12 @@ You should be redirected to the song at:<br /><br />
 
 <a id="destination" href="${new URL("#" + this._doc.song.toBase64String(), location.href).href}"></a>
 
+<br /><br />
+
+<small>That address points at the copy of the editor this was exported from. To
+open this song in a different or newer copy, open that editor and use
+File &rarr; Import Song on this file.</small>
+
 <style>
 	:root {
 		color: white;
