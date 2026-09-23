@@ -14,7 +14,8 @@
 		"live-editor-fast-typeless": "bash ./scripts/live_editor_fast_typeless.sh",
 		"deploy-website": "bash ./scripts/deploy.sh",
 		"publish": "bash ./scripts/publish_on_npm.sh",
-		"prepublishOnly": "echo \"Use 'npm run publish' instead!\" && exit 1"
+		"prepublishOnly": "echo \"Use 'npm run publish' instead!\" && exit 1",
+		"postbuild": "node scripts/drive-drop.cjs"
 	},
 	"devDependencies": {
 		"@rollup/plugin-node-resolve": "^15.1.0",
