@@ -1115,6 +1115,261 @@ document.head.appendChild(HTML.style({type: "text/css"}, `
 	flex-grow: 1;
 }
 
+.beepboxEditor .presetSearch {
+	position: relative;
+	width: 9em;
+	flex-grow: 1;
+}
+
+.beepboxEditor .presetSearchInput {
+	box-sizing: border-box;
+	width: 100%;
+	height: 22px;
+	margin: 0;
+	padding: 0 6px;
+	border: none;
+	border-radius: 4px;
+	background: ${ColorConfig.uiWidgetBackground};
+	color: ${ColorConfig.primaryText};
+	font-size: 12px;
+	font-family: inherit;
+}
+
+.beepboxEditor .presetSearchInput:focus {
+	outline: 1px solid ${ColorConfig.linkAccent};
+}
+
+.beepboxEditor .presetSearchResults {
+	position: absolute;
+	top: 100%;
+	left: 0;
+	right: 0;
+	z-index: 20;
+	max-height: 240px;
+	overflow-y: auto;
+	margin-top: 2px;
+	border-radius: 4px;
+	background: ${ColorConfig.editorBackground};
+	border: 1px solid ${ColorConfig.uiWidgetBackground};
+	box-shadow: 0 4px 12px rgba(0, 0, 0, 0.5);
+}
+
+.beepboxEditor .presetSearchResult {
+	display: flex;
+	justify-content: space-between;
+	gap: 8px;
+	padding: 3px 6px;
+	font-size: 12px;
+	cursor: pointer;
+	white-space: nowrap;
+}
+
+.beepboxEditor .presetSearchResult.highlighted,
+.beepboxEditor .presetSearchResult:hover {
+	background: ${ColorConfig.uiWidgetBackground};
+}
+
+.beepboxEditor .presetSearchGroup {
+	color: ${ColorConfig.secondaryText};
+	font-size: 10px;
+	overflow: hidden;
+	text-overflow: ellipsis;
+}
+
+.beepboxEditor .presetSearchNone {
+	padding: 4px 6px;
+	font-size: 12px;
+	color: ${ColorConfig.secondaryText};
+}
+
+.beepboxEditor .mixerViews {
+	display: flex;
+	gap: 2px;
+	padding: 2px 0 4px 0;
+	/* Stays put while the grid view scrolls sideways. */
+	position: sticky;
+	left: 0;
+	width: max-content;
+}
+
+.beepboxEditor .mixerView {
+	margin: 0;
+	padding: 0 10px;
+	height: 18px;
+	border: 1px solid ${ColorConfig.uiWidgetBackground};
+	border-radius: 4px;
+	background: transparent;
+	color: ${ColorConfig.secondaryText};
+	font-size: 11px;
+	cursor: pointer;
+}
+
+.beepboxEditor .mixerView.selected {
+	background: ${ColorConfig.uiWidgetBackground};
+	color: ${ColorConfig.primaryText};
+}
+
+.beepboxEditor .stripRow {
+	display: flex;
+	/* Wrap rather than run off the edge: the track area cannot scroll sideways
+	   on a song with few measures, so a strip past the edge would be unreachable. */
+	flex-wrap: wrap;
+	gap: 4px 6px;
+	padding: 0 4px;
+	position: sticky;
+	left: 0;
+	width: var(--mixer-visible-width, max-content);
+	box-sizing: border-box;
+}
+
+.beepboxEditor .strip {
+	display: flex;
+	flex-direction: column;
+	align-items: center;
+	gap: 2px;
+	padding: 3px 4px 4px 4px;
+	border-radius: 4px;
+}
+
+.beepboxEditor .strip.selected {
+	background: ${ColorConfig.uiWidgetBackground};
+}
+
+.beepboxEditor .strip.muted .stripBody {
+	opacity: 0.4;
+}
+
+.beepboxEditor .stripName {
+	font-size: 12px;
+	font-weight: bold;
+	white-space: nowrap;
+}
+
+.beepboxEditor .stripDb {
+	font-size: 11px;
+	color: ${ColorConfig.primaryText};
+	white-space: nowrap;
+}
+
+.beepboxEditor .stripBody {
+	display: flex;
+	gap: 3px;
+	align-items: flex-start;
+}
+
+.beepboxEditor .stripScale {
+	position: relative;
+	width: 20px;
+}
+
+.beepboxEditor .stripMark {
+	position: absolute;
+	right: 0;
+	font-size: 9px;
+	line-height: 8px;
+	color: ${ColorConfig.secondaryText};
+}
+
+.beepboxEditor .stripMeter {
+	position: relative;
+	width: 12px;
+	overflow: hidden;
+}
+
+/* Red at the top, then yellow, then green: red above about -9 dB, yellow above about -20 dB. */
+.beepboxEditor .meterDim, .beepboxEditor .meterLive {
+	position: absolute;
+	inset: 0;
+	background: linear-gradient(to bottom, #d8443d 0%, #d8443d 19%, #d8b830 19%, #d8b830 42%, #3fb14a 42%, #3fb14a 100%);
+}
+
+.beepboxEditor .meterDim {
+	opacity: 0.28;
+}
+
+.beepboxEditor .stripFader {
+	position: relative;
+	width: 24px;
+	cursor: ns-resize;
+	touch-action: none;
+}
+
+.beepboxEditor .stripTrack {
+	position: absolute;
+	left: 10px;
+	top: 0;
+	bottom: 0;
+	width: 4px;
+	border-radius: 2px;
+	background: #2d6cdf;
+}
+
+.beepboxEditor .stripThumb {
+	position: absolute;
+	left: 1px;
+	width: 22px;
+	border-radius: 3px;
+	background: #f2f2f2;
+	pointer-events: none;
+}
+
+.beepboxEditor .stripMute {
+	margin: 2px 0 0 0;
+	padding: 0 8px;
+	height: 18px;
+	border: 1px solid ${ColorConfig.uiWidgetBackground};
+	border-radius: 4px;
+	background: transparent;
+	color: ${ColorConfig.primaryText};
+	font-size: 10px;
+	cursor: pointer;
+}
+
+.beepboxEditor .stripMute::before {
+	content: "Mute";
+}
+
+.beepboxEditor .stripMute.muted {
+	background: #b33a3a;
+	border-color: #b33a3a;
+}
+
+.beepboxEditor .stripMute.muted::before {
+	content: "Muted";
+}
+
+.beepboxEditor .trackTabs {
+	display: flex;
+	gap: 2px;
+	margin-bottom: 3px;
+}
+
+.beepboxEditor .trackTab {
+	margin: 0;
+	padding: 0 12px;
+	height: 22px;
+	border: none;
+	border-bottom: 2px solid transparent;
+	border-radius: 4px 4px 0 0;
+	background: transparent;
+	color: ${ColorConfig.secondaryText};
+	font-size: 12px;
+	white-space: nowrap;
+	cursor: pointer;
+}
+
+.beepboxEditor .trackTab:hover,
+.beepboxEditor .trackTab:focus {
+	background: transparent;
+	color: ${ColorConfig.primaryText};
+}
+
+.beepboxEditor .trackTab.selected {
+	background: ${ColorConfig.uiWidgetBackground};
+	border-bottom-color: ${ColorConfig.linkAccent};
+	color: ${ColorConfig.primaryText};
+}
+
 .beepboxEditor .trackRow {
 	display: flex;
 	align-items: stretch;

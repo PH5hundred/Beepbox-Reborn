@@ -1886,6 +1886,9 @@ export class Song {
 		this.loopLength = 4;
 		this.repeatSections.length = 0;
 		this.masterVolume = Config.measureVolumeMax;
+		// Parsing a song reuses these channels, and a song with no volume tag says
+		// nothing, so without this an undo back to "no changes" keeps the old ones.
+		for (const channel of this.channels) channel.barVolumes.length = 0;
 		this.tempo = 150;
 		this.beatsPerBar = 8;
 		this.beatUnit = Config.beatUnitDefault;
@@ -4774,6 +4777,15 @@ export class Synth {
 	}
 	
 	public samplesPerSecond: number = 44100;
+	
+	// Added in Beepbox Reborn, for the mixer's level meters. When switched on, each
+	// channel's loudest sample since the last read is kept in channelPeaks (linear,
+	// 1.0 = full scale, before the master volume and limiter). Off by default so
+	// exports and the player do not pay for a view nobody is looking at.
+	public measureLevels: boolean = false;
+	public readonly channelPeaks: number[] = [];
+	private levelBeforeL: Float32Array = new Float32Array(0);
+	private levelBeforeR: Float32Array = new Float32Array(0);
 	public panningDelayBufferSize: number;
 	public panningDelayBufferMask: number;
 	public chorusDelayBufferSize: number;
@@ -5201,7 +5213,11 @@ export class Synth {
 					}
 					
 					if (instrumentState.awake) {
-						Synth.effectsSynth(this, outputDataL, outputDataR, bufferIndex, runLength, instrumentState);
+						if (this.measureLevels) {
+							this.effectsSynthMeasured(channelIndex, outputDataL, outputDataR, bufferIndex, runLength, instrumentState);
+						} else {
+							Synth.effectsSynth(this, outputDataL, outputDataR, bufferIndex, runLength, instrumentState);
+						}
 					}
 				}
 			}
@@ -6832,6 +6848,28 @@ export class Synth {
 		}
 		
 		pickedStringFunction(synth, bufferIndex, runLength, tone, instrumentState);
+	}
+	
+	// Every instrument adds itself into the shared output, so what one channel
+	// contributes is what the output gained while it ran: snapshot, run, subtract.
+	private effectsSynthMeasured(channelIndex: number, outputDataL: Float32Array, outputDataR: Float32Array, bufferIndex: number, runLength: number, instrumentState: InstrumentState): void {
+		if (this.levelBeforeL.length < runLength) {
+			this.levelBeforeL = new Float32Array(runLength);
+			this.levelBeforeR = new Float32Array(runLength);
+		}
+		for (let i: number = 0; i < runLength; i++) {
+			this.levelBeforeL[i] = outputDataL[bufferIndex + i];
+			this.levelBeforeR[i] = outputDataR[bufferIndex + i];
+		}
+		Synth.effectsSynth(this, outputDataL, outputDataR, bufferIndex, runLength, instrumentState);
+		let peak: number = this.channelPeaks[channelIndex] || 0;
+		for (let i: number = 0; i < runLength; i++) {
+			const l: number = Math.abs(outputDataL[bufferIndex + i] - this.levelBeforeL[i]);
+			const r: number = Math.abs(outputDataR[bufferIndex + i] - this.levelBeforeR[i]);
+			if (l > peak) peak = l;
+			if (r > peak) peak = r;
+		}
+		this.channelPeaks[channelIndex] = peak;
 	}
 	
 	private static effectsSynth(synth: Synth, outputDataL: Float32Array, outputDataR: Float32Array, bufferIndex: number, runLength: number, instrumentState: InstrumentState): void {

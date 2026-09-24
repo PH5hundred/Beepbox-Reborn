@@ -17,10 +17,12 @@ import {FadeInOutEditor} from "./FadeInOutEditor.js";
 import {FilterEditor} from "./FilterEditor.js";
 import {MuteEditor} from "./MuteEditor.js";
 import {TrackEditor} from "./TrackEditor.js";
+import {MixerPanel} from "./MixerPanel.js";
+import {PresetSearch} from "./PresetSearch.js";
 import {ChannelRow} from "./ChannelRow.js";
 import {LayoutPrompt} from "./LayoutPrompt.js";
 import {LoopEditor} from "./LoopEditor.js";
-import {Tour, EDITOR_STEPS, INSTRUMENT_STEPS} from "./Tour.js";
+import {Tour, TourHooks, EDITOR_STEPS, INSTRUMENT_STEPS} from "./Tour.js";
 import {SpectrumEditor} from "./SpectrumEditor.js";
 import {HarmonicsEditor} from "./HarmonicsEditor.js";
 import {BarScrollBar} from "./BarScrollBar.js";
@@ -187,6 +189,7 @@ export class SongEditor {
 	private readonly _muteEditor: MuteEditor = new MuteEditor(this.doc);
 	private readonly _trackEditor: TrackEditor = new TrackEditor(this.doc);
 	private readonly _loopEditor: LoopEditor = new LoopEditor(this.doc);
+	private readonly _mixerEditor: MixerPanel = new MixerPanel(this.doc);
 	private readonly _octaveScrollBar: OctaveScrollBar = new OctaveScrollBar(this.doc);
 	private readonly _piano: Piano = new Piano(this.doc);
 	private readonly _playButton: HTMLButtonElement = button({class: "playButton", type: "button", title: "Play (Space)"}, span("Play"));
@@ -275,6 +278,7 @@ export class SongEditor {
 	private readonly _rhythmSelect: HTMLSelectElement = buildOptions(select(), Config.rhythms.map(rhythm=>rhythm.name));
 	private readonly _pitchedPresetSelect: HTMLSelectElement = buildPresetOptions(false);
 	private readonly _drumPresetSelect: HTMLSelectElement = buildPresetOptions(true);
+	private readonly _presetSearch: PresetSearch = new PresetSearch(() => this.doc.song.getChannelIsNoise(this.doc.channel) ? this._drumPresetSelect : this._pitchedPresetSelect);
 	private readonly _algorithmSelect: HTMLSelectElement = buildOptions(select(), Config.algorithms.map(algorithm=>algorithm.name));
 	private readonly _algorithmSelectRow: HTMLDivElement = div({class: "selectRow"}, span({class: "tip", onclick: ()=>this._openPrompt("algorithm")}, "Algorithm:"), div({class: "selectContainer"}, this._algorithmSelect));
 	private readonly _instrumentButtons: HTMLButtonElement[] = [];
@@ -400,6 +404,10 @@ export class SongEditor {
 		this._instrumentVolumeSliderRow,
 		this._reverbRow,
 		div({class: "selectRow"},
+			span({class: "tip", onclick: ()=>this._openPrompt("instrumentType")}, "Search:"),
+			this._presetSearch.container,
+		),
+		div({class: "selectRow"},
 			span({class: "tip", onclick: ()=>this._openPrompt("instrumentType")}, "Type:"),
 			div({class: "selectContainer"}, this._pitchedPresetSelect, this._drumPresetSelect),
 		),
@@ -452,16 +460,22 @@ export class SongEditor {
 		this._instrumentSlotBar,
 		this._loopEditor.container,
 	);
+	private _trackTab: "measures" | "mixer" = "measures";
+	private readonly _measuresTabButton: HTMLButtonElement = button({class: "trackTab", type: "button", title: "Edit patterns, measures, loops and instrument slots", onclick: () => this._setTrackTab("measures")}, "Measures & Loops");
+	private readonly _mixerTabButton: HTMLButtonElement = button({class: "trackTab", type: "button", title: "Set every instrument's volume in every measure", onclick: () => this._setTrackTab("mixer")}, "Mixer");
+	private readonly _trackTabs: HTMLDivElement = div({class: "trackTabs"}, this._measuresTabButton, this._mixerTabButton);
 	private readonly _trackVisibleArea: HTMLDivElement = div({style: "position: absolute; width: 100%; height: 100%; pointer-events: none;"});
 	private readonly _trackAndMuteContainer: HTMLDivElement = div({class: "trackAndMuteContainer prefers-big-scrollbars"},
 		this._muteEditor.container,
 		this._trackContainer,
+		this._mixerEditor.container,
 		this._trackVisibleArea,
 	);
 	private readonly _barScrollBar: BarScrollBar = new BarScrollBar(this.doc, this._trackAndMuteContainer);
 	private readonly _sheetMusicButton: HTMLButtonElement = button({class: "sheetMusicButton", type: "button", title: "Transpose the song and write it out as sheet music"}, "Transpose / Generate Sheet Music");
 	private readonly _sheetMusicBar: HTMLDivElement = div({class: "sheetMusicBar"}, this._sheetMusicButton);
 	private readonly _trackArea: HTMLDivElement = div({class: "track-area"},
+		this._trackTabs,
 		this._trackAndMuteContainer,
 		this._barScrollBar.container,
 		this._sheetMusicBar,
@@ -864,9 +878,34 @@ export class SongEditor {
 	// Slots are pitch channels; the Edit menu still covers noise channels and
 	// inserting a slot anywhere other than the end.
 	private _whenTourPressed = (): void => {
-		if (this._tour == null) this._tour = new Tour(this.mainLayer, EDITOR_STEPS);
+		if (this._tour == null) this._tour = new Tour(this.mainLayer, EDITOR_STEPS, this._tourHooks);
 		this._tour.start();
 	}
+
+	// The tour visits both the Measures & Loops tab and the Mixer, so it moves the
+	// editor between them and puts it back where the user was afterwards.
+	private _tourReturnTo: {tab: "measures" | "mixer", view: "faders" | "measures"} | null = null;
+	private readonly _tourHooks: TourHooks = {
+		begin: (): void => {
+			if (this._tourReturnTo == null) this._tourReturnTo = {tab: this._trackTab, view: this._mixerEditor.view};
+		},
+		prepare: (key: string): void => {
+			if (key == "measures") {
+				this._trackTab = "measures";
+			} else {
+				this._trackTab = "mixer";
+				this._mixerEditor.showView(key == "mixer-measures" ? "measures" : "faders");
+			}
+			this.whenUpdated();
+		},
+		end: (): void => {
+			if (this._tourReturnTo == null) return;
+			this._trackTab = this._tourReturnTo.tab;
+			this._mixerEditor.showView(this._tourReturnTo.view);
+			this._tourReturnTo = null;
+			this.whenUpdated();
+		},
+	};
 
 	private _whenInstrumentTourPressed = (): void => {
 		if (this._instrumentTour == null) this._instrumentTour = new Tour(this.mainLayer, INSTRUMENT_STEPS);
@@ -927,6 +966,17 @@ export class SongEditor {
 		this._barScrollBar.render();
 		this._muteEditor.render();
 		this._trackEditor.render();
+		const mixerShown: boolean = this._trackTab == "mixer";
+		this._trackContainer.style.display = mixerShown ? "none" : "";
+		this._mixerEditor.container.style.display = mixerShown ? "" : "none";
+		this._measuresTabButton.classList.toggle("selected", !mixerShown);
+		this._mixerTabButton.classList.toggle("selected", mixerShown);
+		if (mixerShown) {
+			this._mixerEditor.container.style.setProperty("--mixer-visible-width", Math.max(0, this._trackVisibleArea.clientWidth - (prefs.enableChannelMuting ? 32 : 0)) + "px");
+			this._mixerEditor.render();
+			// Keep the scroll range the same as the other tab, which reserves room past the last measure for its buttons.
+			this._mixerEditor.container.style.paddingRight = (EditorConfig.addMeasureBarSpan * this.doc.getBarWidth()) + "px";
+		}
 		
 		this._trackAndMuteContainer.scrollLeft = this.doc.barScrollPos * this.doc.getBarWidth();
 		this._trackAndMuteContainer.scrollTop = this.doc.channelScrollPos * ChannelRow.patternHeight;
@@ -1885,6 +1935,12 @@ export class SongEditor {
 		} else {
 			this.doc.performance.record();
 		}
+	}
+	
+	private _setTrackTab(tab: "measures" | "mixer"): void {
+		if (this._trackTab == tab) return;
+		this._trackTab = tab;
+		this.doc.notifier.changed();
 	}
 	
 	private _setVolumeSlider = (): void => {

@@ -12,6 +12,18 @@ interface TourStep {
 	readonly find: (root: HTMLElement) => HTMLElement | null;
 	readonly title: string;
 	readonly body: string;
+	// Some parts of the editor only exist on one tab. A step names what it needs
+	// and the editor's hooks put it on screen, so the tour is not at the mercy of
+	// whichever tab the user happened to have open.
+	readonly prepare?: string;
+}
+
+// What the tour asks of the editor around it. prepare is synchronous: by the time
+// it returns, the step's target has been drawn.
+export interface TourHooks {
+	begin(): void;
+	prepare(key: string): void;
+	end(): void;
 }
 
 // Finds a "Scale:" / "Tempo:" style row by its label, which survives the rows
@@ -106,7 +118,7 @@ export const EDITOR_STEPS: TourStep[] = [
 	{
 		find: bySelector(".measureVolumeRow"),
 		title: "Measure volume",
-		body: "The volume of one measure of one instrument. It follows whichever measure is selected in the track, so click a box and then drag this. That is how you write a swell or drop one part back under another, and the sheet music prints it as a dynamic marking - mf, f, ff and so on - wherever it changes.",
+		body: "The volume of one measure of one instrument. It follows whichever measure is selected in the track, so click a box and then drag this. That is how you write a swell or drop one part back under another, and the sheet music prints it as a dynamic marking - mf, f, ff and so on - wherever it changes. The Mixer tab shows this for every measure at once.",
 	},
 	{
 		find: (root) => rowByLabel(root, "Rhythm"),
@@ -134,24 +146,64 @@ export const EDITOR_STEPS: TourStep[] = [
 		body: "One box per channel. Click to mute a channel, so you can listen to a single part while you work on it. Muting is a listening aid and is not saved as part of the song.",
 	},
 	{
+		find: bySelector(".trackTabs"),
+		prepare: "measures",
+		title: "Measures & Loops and Mixer",
+		body: "The area under the note grid has two tabs. 'Measures & Loops' is the map of the song that the next few steps cover. 'Mixer' swaps it for a mixing desk. Switch between them whenever you like; both edit the same song, so nothing is lost by changing tab.",
+	},
+	{
 		find: bySelector(".trackRow"),
+		prepare: "measures",
 		title: "The track",
 		body: "The map of the whole song: one row per instrument, one box per measure. The number in a box is which pattern plays there. Click the top half of a box to count up and the bottom half to count down — reusing the same number in two measures makes them the same music, so editing one edits both.",
 	},
 	{
 		find: bySelector(".measureButtons"),
+		prepare: "measures",
 		title: "Adding and removing measures",
 		body: "Append or drop a measure at the end of the song. Unlike upstream BeepBox, a new song is only as long as what you have actually written, instead of opening with a row of empty measures. The track scrolls sideways once it outgrows the window.",
 	},
 	{
 		find: bySelector(".instrumentSlotBar"),
+		prepare: "measures",
 		title: "Instrument slots",
 		body: "Add or remove channels. Each slot is its own row in the track with its own instrument, up to BeepBox's ceiling of ten pitch channels. Drum channels are still added from the Edit menu.",
 	},
 	{
 		find: bySelector(".loopEditor"),
+		prepare: "measures",
 		title: "Loops and repeat sections",
 		body: "The top bar is the playback loop, which repeats forever while you work. Beneath it are repeat sections: coloured bars that play a span a set number of times and then move on, the way written repeat signs do. Drag across empty measures to make one, drag its middle to move it or its ends to resize, click it to change how many times it repeats, and right-click to delete it. They can nest, and each nesting level gets its own row.",
+	},
+	{
+		find: bySelector(".stripRow"),
+		prepare: "mixer-faders",
+		title: "The mixer",
+		body: "One strip per instrument, like a mixing desk. Each shows the instrument's name, its level in dB, a meter, a fader and a Mute button. It is not a second copy of the volume: it edits the same per-measure volumes as the Measure volume slider, so the two always agree.",
+	},
+	{
+		find: bySelector(".stripMeter"),
+		prepare: "mixer-faders",
+		title: "Level meter",
+		body: "Moves with the sound. Press play and each meter rises and falls with that instrument's notes, then drains away when the sound stops. It reads in dB below full scale and turns yellow and then red as it gets loud. It measures before the volume slider by the play button, so that slider will not change it.",
+	},
+	{
+		find: bySelector(".stripFader"),
+		prepare: "mixer-faders",
+		title: "Fader",
+		body: "Sets the instrument's average volume across the whole song. Drag it down and every measure of that instrument comes down by the same amount, so the loud and soft passages keep their shape and only the average drops. Drag it back up and everything returns exactly as it was. It starts at 0.0 dB, which means unchanged, so it does not move on its own; the meter is the part that moves. One drag is one undo.",
+	},
+	{
+		find: bySelector(".stripMute"),
+		prepare: "mixer-faders",
+		title: "Mute",
+		body: "Silences that instrument so you can hear the others. It is the same mute as the boxes beside the track, and like them it is a listening aid that is not saved in the song.",
+	},
+	{
+		find: bySelector(".mixerEditor"),
+		prepare: "mixer-measures",
+		title: "Per measure",
+		body: "The other view of the mixer, reached with the 'Per measure' button above the faders. A bar for every instrument in every measure: click or drag to set how loud that instrument is in that measure, with the top full volume and the bottom silent. Drag sideways to paint several measures at once. The sheet music prints these changes as dynamic markings.",
 	},
 	{
 		find: bySelector(".barScrollBar"),
@@ -394,9 +446,12 @@ export class Tour {
 		),
 	);
 
-	constructor(root: HTMLElement, steps: TourStep[]) {
+	private readonly _hooks: TourHooks | null;
+
+	constructor(root: HTMLElement, steps: TourStep[], hooks: TourHooks | null = null) {
 		this._root = root;
 		this._steps = steps;
+		this._hooks = hooks;
 		this._backButton.addEventListener("click", () => this._go(this._index - 1));
 		this._nextButton.addEventListener("click", () => this._go(this._index + 1));
 		this._skipButton.addEventListener("click", () => this.stop());
@@ -409,13 +464,18 @@ export class Tour {
 		// Steps whose target is missing or collapsed are dropped up front, so the
 		// "step 4 of 20" count matches what the user will actually be shown.
 		this._resolvedSteps = [];
+		if (this._hooks != null) this._hooks.begin();
 		for (const step of this._steps) {
+			if (step.prepare != undefined && this._hooks != null) this._hooks.prepare(step.prepare);
 			const target: HTMLElement | null = step.find(this._root);
 			if (target == null) continue;
 			if (target.offsetWidth == 0 && target.offsetHeight == 0) continue;
 			this._resolvedSteps.push({step, target: target});
 		}
-		if (this._resolvedSteps.length == 0) return;
+		if (this._resolvedSteps.length == 0) {
+			if (this._hooks != null) this._hooks.end();
+			return;
+		}
 
 		this._overlay = div({class: "tourOverlay"},
 			this._panelTop, this._panelBottom, this._panelLeft, this._panelRight,
@@ -436,6 +496,8 @@ export class Tour {
 		window.removeEventListener("scroll", this._reposition, true);
 		if (this._overlay.parentNode != null) this._overlay.parentNode.removeChild(this._overlay);
 		this._overlay = null;
+		// Put the editor back on the tab the user was looking at.
+		if (this._hooks != null) this._hooks.end();
 	}
 
 	private _go(index: number): void {
@@ -466,6 +528,9 @@ export class Tour {
 		this._nextButton.textContent = this._index == this._resolvedSteps.length - 1 ? "Done" : "Next";
 		this._skipButton.style.visibility = this._index == this._resolvedSteps.length - 1 ? "hidden" : "";
 
+		// Steps are worked out before the tour opens, so the tab a step lives on
+		// may not be the one showing now.
+		if (entry.step.prepare != undefined && this._hooks != null) this._hooks.prepare(entry.step.prepare);
 		entry.target.scrollIntoView({block: "center", inline: "center", behavior: "smooth"});
 		// Let the smooth scroll settle before measuring, or the hole lands where
 		// the target used to be.

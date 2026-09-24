@@ -190,6 +190,115 @@ var SheetMusic = (function () {
 		return {filled: true, stem: true, flags: 2, dotted: false};
 	}
 
+	// ---- rests ---------------------------------------------------------------
+	// Silence is written, not left as blank space. Each measure's gaps are the
+	// stretches no note covers; a measure with no notes at all is a whole-measure
+	// rest, drawn the same way whatever the time signature.
+	var REST_SIZES = [96, 48, 24, 12, 6];   // whole, half, quarter, eighth, sixteenth (in parts, at 24 per beat)
+
+	// Split a silent stretch into rests that start where a reader expects them:
+	// a half rest begins on beat 1 or 3, never on beat 2, so the largest value
+	// that fits AND begins on its own multiple is taken each time. Anything left
+	// that is shorter than a sixteenth (a triplet leftover) is not written, and
+	// a gap that begins off the sixteenth grid starts at the next grid line.
+	function splitRest(start, end, partsPerBeat) {
+		var scale = partsPerBeat / 24;
+		var out = [];
+		var pos = start;
+		while (pos < end) {
+			var picked = 0;
+			for (var i = 0; i < REST_SIZES.length; i++) {
+				var d = REST_SIZES[i] * scale;
+				if (d <= end - pos && pos % d === 0) { picked = d; break; }
+			}
+			if (picked === 0) {
+				// A note that does not end on a sixteenth (a dotted sixteenth, say)
+				// leaves the gap starting off the grid. Skip the sliver up to the
+				// next sixteenth and carry on, rather than dropping the whole rest.
+				var grid = REST_SIZES[REST_SIZES.length - 1] * scale;
+				if (pos % grid === 0) break;
+				pos = Math.ceil(pos / grid) * grid;
+				continue;
+			}
+			out.push({start: pos, duration: picked});
+			pos += picked;
+		}
+		return out;
+	}
+
+	// events are already split at barlines, so each lies inside one measure.
+	function collectRests(events, barCount, partsPerBar, partsPerBeat) {
+		var byBar = [];
+		for (var b = 0; b < barCount; b++) byBar.push([]);
+		for (var i = 0; i < events.length; i++) {
+			if (events[i].bar < barCount) byBar[events[i].bar].push(events[i]);
+		}
+		var rests = [];
+		for (b = 0; b < barCount; b++) {
+			var barStart = b * partsPerBar, barEnd = barStart + partsPerBar;
+			var list = byBar[b];
+			if (list.length === 0) {
+				rests.push({bar: b, start: barStart, duration: partsPerBar, wholeMeasure: true});
+				continue;
+			}
+			var cursor = barStart;
+			for (var j = 0; j < list.length; j++) {
+				if (list[j].start > cursor) {
+					var gap = splitRest(cursor - barStart, list[j].start - barStart, partsPerBeat);
+					for (var g = 0; g < gap.length; g++) {
+						rests.push({bar: b, start: barStart + gap[g].start, duration: gap[g].duration, wholeMeasure: false});
+					}
+				}
+				cursor = Math.max(cursor, list[j].start + list[j].duration);
+			}
+			if (cursor < barEnd) {
+				var tail = splitRest(cursor - barStart, partsPerBar, partsPerBeat);
+				for (g = 0; g < tail.length; g++) {
+					rests.push({bar: b, start: barStart + tail[g].start, duration: tail[g].duration, wholeMeasure: false});
+				}
+			}
+		}
+		return rests;
+	}
+
+	// Rests are drawn from shapes rather than font glyphs: the musical-symbol
+	// characters are missing or mis-sized in many fonts (the clef needed
+	// measuring for that reason), and a rest that lands on the wrong line reads
+	// as a different value. `top` is the top staff line; lines are 2*GAP apart.
+	function drawRest(svg, x, top, GAP, parts_, partsPerBeat, wholeMeasure) {
+		var line = 2 * GAP;
+		var ink = {fill: "#000"};
+		if (wholeMeasure || parts_ >= partsPerBeat * 4) {
+			// hangs from the fourth line
+			el("rect", {x: x - 7, y: top + line, width: 14, height: GAP, fill: "#000"}, svg);
+			return;
+		}
+		if (parts_ >= partsPerBeat * 2) {
+			// sits on the middle line
+			el("rect", {x: x - 7, y: top + 2 * line - GAP, width: 14, height: GAP, fill: "#000"}, svg);
+			return;
+		}
+		var stroke = {stroke: "#000", "stroke-width": 2.2, fill: "none", "stroke-linejoin": "round", "stroke-linecap": "round"};
+		if (parts_ >= partsPerBeat) {
+			// the quarter rest's zigzag with a small hook at the bottom
+			var y = top + line * 0.55;
+			el("path", {d: "M " + (x - 3) + " " + y + " L " + (x + 3) + " " + (y + 10) + " L " + (x - 3) + " " + (y + 20) +
+				" L " + (x + 3) + " " + (y + 29) + " Q " + (x - 5) + " " + (y + 28) + " " + (x - 3) + " " + (y + 36), ...stroke}, svg);
+			return;
+		}
+		// eighth and sixteenth: a slanted stem with one or two flag dots
+		var flags = parts_ >= partsPerBeat / 2 ? 1 : 2;
+		var yTop = top + line * 0.75;
+		var yBottom = yTop + 12 + flags * 9;
+		el("path", {d: "M " + (x + 3) + " " + yTop + " L " + (x - 2 - (flags - 1) * 2) + " " + yBottom, ...stroke}, svg);
+		for (var f = 0; f < flags; f++) {
+			var fy = yTop + 5 + f * 9;
+			var fx = x + 3 - f * 2;
+			el("circle", {cx: fx - 4, cy: fy + 2, r: 2.3, ...ink}, svg);
+			el("path", {d: "M " + (fx - 4) + " " + (fy + 2) + " Q " + (fx - 1) + " " + (fy + 2) + " " + (fx + 2) + " " + (fy - 5), ...stroke, "stroke-width": 1.6}, svg);
+		}
+	}
+
 	// ---- the renderer --------------------------------------------------------
 	// instrument: {name, semitones} or null to leave the part at concert pitch.
 	function renderChannel(song, channelIndex, instrument) {
@@ -448,6 +557,18 @@ var SheetMusic = (function () {
 			}
 			ev.yLow = ev.top + STAFF - ev.minSteps * GAP;
 			ev.yHigh = ev.top + STAFF - ev.maxSteps * GAP;
+		}
+
+		// Rests, in the gaps between notes and across empty measures.
+		var rests = collectRests(events, song.barCount, partsPerBar, partsPerBeat);
+		for (var ri = 0; ri < rests.length; ri++) {
+			var rest = rests[ri];
+			var restTop = topOfBar(rest.bar);
+			var barLeft = LEFT + (rest.bar % PER_LINE) * BAR_W;
+			var restX = rest.wholeMeasure
+				? barLeft + BAR_W / 2
+				: xOfEvent(rest) + 2;
+			drawRest(svg, restX, restTop, GAP, rest.duration, partsPerBeat, rest.wholeMeasure);
 		}
 
 		// Ties and slurs first, so the curves pass behind the noteheads.
