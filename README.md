@@ -2,6 +2,24 @@
 
 **This is a fork. BeepBox is not my software.**
 
+## Download
+
+### [⬇ Download BeepBox: Reborn](https://github.com/PH5hundred/Beepbox-Reborn/releases/latest/download/BeepBox-Reborn.html)
+
+One file, about 0.8 MB. No install, no account, no server.
+
+1. Click the link above. Your browser saves a single file, `BeepBox-Reborn.html`.
+2. Double-click it. It opens in your browser and runs from your own computer.
+
+It also works on a Chromebook. Everything works without an internet connection
+except exporting an MP3, which fetches its encoder the first time you use it.
+
+Songs live in the page address, as in BeepBox itself, so use **File → Copy Song
+URL** or **File → Export Song** to keep one. Older builds and release notes are on the
+[Releases page](https://github.com/PH5hundred/Beepbox-Reborn/releases).
+
+---
+
 BeepBox is an online tool for sketching and sharing instrumental melodies. It was
 created by [John Nesky](https://johnnesky.com/), it lives at
 [beepbox.co](https://www.beepbox.co), and its source is at
