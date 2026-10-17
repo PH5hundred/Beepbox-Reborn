@@ -31,7 +31,7 @@ export function discardInvalidPatternInstruments(instruments: number[], song: So
 }
 
 export function unionOfUsedNotes(pattern: Pattern, flags: boolean[]): void {
-	for (const note of pattern.notes) {
+	for (const note of pattern.allNotes()) {
 		for (const pitch of note.pitches) {
 			for (const pin of note.pins) {
 				const key: number = (pitch + pin.interval) % 12;
@@ -282,8 +282,8 @@ export class ChangeMoveAndOverflowNotes extends ChangeGroup {
 				const oldPattern: Pattern | null = doc.song.getPattern(channelIndex, oldBar);
 				if (oldPattern != null) {
 					const oldBarStart: number = oldBar * oldPartsPerBar;
-					for (const oldNote of oldPattern.notes) {
-						
+					for (const oldNote of oldPattern.allNotes()) {
+
 						const absoluteNoteStart: number = oldNote.start + oldBarStart + partsToMove;
 						const absoluteNoteEnd: number = oldNote.end + oldBarStart + partsToMove;
 						
@@ -315,8 +315,9 @@ export class ChangeMoveAndOverflowNotes extends ChangeGroup {
 					}
 				}
 			}
+			for (const newPattern of newChannel.patterns) newPattern.relayer();
 		}
-	
+
 		removeDuplicatePatterns(pitchChannels);
 		removeDuplicatePatterns(noiseChannels);
 		this.append(new ChangeReplacePatterns(doc, pitchChannels, noiseChannels));
@@ -1882,7 +1883,10 @@ export class ChangePaste extends ChangeGroup {
 			
 			selectionStart += oldPartDuration;
 		}
-		
+
+		// Copied notes may overlap each other if they came from a layered pattern.
+		this.append(new ChangeRelayerPattern(doc, pattern));
+
 		doc.notifier.changed();
 		this._didSomething();
 	}
@@ -1938,6 +1942,7 @@ export class ChangeEnsurePatternExists extends UndoableChange {
 	private _channelIndex: number;
 	private _patternIndex: number;
 	private _patternOldNotes: Note[] | null = null;
+	private _patternOldLayers: Note[][] | null = null;
 	private _oldPatternCount: number;
 	private _newPatternCount: number;
 	private _oldPatternInstruments: number[] | null = null;
@@ -1970,7 +1975,7 @@ export class ChangeEnsurePatternExists extends UndoableChange {
 				firstUnusedIndex = patternIndex;
 			}
 			const pattern: Pattern = song.channels[channelIndex].patterns[patternIndex - 1];
-			if (pattern.notes.length == 0) {
+			if (pattern.notes.length == 0 && !pattern.hasLayers()) {
 				firstEmptyUnusedIndex = patternIndex;
 				break;
 			}
@@ -1985,6 +1990,7 @@ export class ChangeEnsurePatternExists extends UndoableChange {
 		} else if (firstUnusedIndex != null) {
 			this._patternIndex = firstUnusedIndex;
 			this._patternOldNotes = song.channels[channelIndex].patterns[firstUnusedIndex - 1].notes;
+			this._patternOldLayers = song.channels[channelIndex].patterns[firstUnusedIndex - 1].layers;
 			this._oldPatternInstruments = song.channels[channelIndex].patterns[firstUnusedIndex - 1].instruments.concat();
 		} else {
 			throw new Error();
@@ -2004,6 +2010,7 @@ export class ChangeEnsurePatternExists extends UndoableChange {
 		song.patternsPerChannel = this._newPatternCount;
 		const pattern: Pattern = song.channels[this._channelIndex].patterns[this._patternIndex - 1];
 		pattern.notes = [];
+		pattern.layers = [];
 		pattern.instruments.length = 0;
 		pattern.instruments.push(...this._newPatternInstruments);
 		song.channels[this._channelIndex].bars[this._bar] = this._patternIndex;
@@ -2014,6 +2021,7 @@ export class ChangeEnsurePatternExists extends UndoableChange {
 		const song: Song = this._doc.song;
 		const pattern: Pattern = song.channels[this._channelIndex].patterns[this._patternIndex - 1];
 		if (this._patternOldNotes != null) pattern.notes = this._patternOldNotes;
+		if (this._patternOldLayers != null) pattern.layers = this._patternOldLayers;
 		if (this._oldPatternInstruments != null) {
 			pattern.instruments.length = 0;
 			pattern.instruments.push(...this._oldPatternInstruments);
@@ -2157,16 +2165,21 @@ export class ChangePatternRhythm extends ChangeSequence {
 			}
 		};
 		
-		let i: number = 0;
-		while (i < pattern.notes.length) {
-			const note: Note = pattern.notes[i];
-			if (changeRhythm(note.start) >= changeRhythm(note.end)) {
-				this.append(new ChangeNoteAdded(doc, pattern, note, i, true));
-			} else {
-				this.append(new ChangeRhythmNote(doc, note, changeRhythm));
-				i++;
+		const hadLayers: boolean = pattern.layers.length > 0;
+		for (let layer: number = 0; layer < pattern.getLayerCount(); layer++) {
+			const layerView: Pattern = layerPattern(pattern, layer);
+			let i: number = 0;
+			while (i < layerView.notes.length) {
+				const note: Note = layerView.notes[i];
+				if (changeRhythm(note.start) >= changeRhythm(note.end)) {
+					this.append(new ChangeNoteAdded(doc, layerView, note, i, true));
+				} else {
+					this.append(new ChangeRhythmNote(doc, note, changeRhythm));
+					i++;
+				}
 			}
 		}
+		if (hadLayers) this.append(new ChangeRelayerPattern(doc, pattern));
 	}
 }
 
@@ -2199,7 +2212,7 @@ export class ChangeMoveNotesSideways extends ChangeGroup {
 						for (let bar: number = 1; bar >= 0; bar--) {
 							const barStartPart: number = bar * partsPerBar;
 							
-							for (const oldNote of pattern.notes) {
+							for (const oldNote of pattern.allNotes()) {
 								const absoluteNoteStart: number = oldNote.start + partsToMove;
 								const absoluteNoteEnd: number = oldNote.end + partsToMove;
 								const noteStartPart: number = Math.max(0, absoluteNoteStart - barStartPart);
@@ -2212,6 +2225,8 @@ export class ChangeMoveNotesSideways extends ChangeGroup {
 						}
 						
 						pattern.notes = newNotes;
+						pattern.layers = [];
+						pattern.relayer();
 					}
 				}
 			} break;
@@ -2288,17 +2303,21 @@ export class ChangeBeatsPerBar extends ChangeGroup {
 					};
 					for (let channelIndex: number = 0; channelIndex < doc.song.getChannelCount(); channelIndex++) {
 						for (let patternIndex: number = 0; patternIndex < doc.song.channels[channelIndex].patterns.length; patternIndex++) {
-							const pattern: Pattern = doc.song.channels[channelIndex].patterns[patternIndex]; 
-							let noteIndex: number = 0;
-							while (noteIndex < pattern.notes.length) {
-								const note: Note = pattern.notes[noteIndex];
-								if (changeRhythm(note.start) >= changeRhythm(note.end)) {
-									this.append(new ChangeNoteAdded(doc, pattern, note, noteIndex, true));
-								} else {
-									this.append(new ChangeRhythmNote(doc, note, changeRhythm));
-									noteIndex++;
+							const pattern: Pattern = doc.song.channels[channelIndex].patterns[patternIndex];
+							for (let layer: number = 0; layer < pattern.getLayerCount(); layer++) {
+								const layerView: Pattern = layerPattern(pattern, layer);
+								let noteIndex: number = 0;
+								while (noteIndex < layerView.notes.length) {
+									const note: Note = layerView.notes[noteIndex];
+									if (changeRhythm(note.start) >= changeRhythm(note.end)) {
+										this.append(new ChangeNoteAdded(doc, layerView, note, noteIndex, true));
+									} else {
+										this.append(new ChangeRhythmNote(doc, note, changeRhythm));
+										noteIndex++;
+									}
 								}
 							}
+							if (pattern.layers.length > 0) this.append(new ChangeRelayerPattern(doc, pattern));
 						}
 					}
 					this.append(new ChangeTempo(doc, doc.song.tempo, doc.song.tempo * newValue / doc.song.beatsPerBar));
@@ -2339,7 +2358,7 @@ export class ChangeDetectKey extends ChangeGroup {
 			for (let barIndex: number = 0; barIndex < song.barCount; barIndex++) {
 				const pattern: Pattern | null = song.getPattern(channelIndex, barIndex);
 				if (pattern != null) {
-					for (const note of pattern.notes) {
+					for (const note of pattern.allNotes()) {
 						const prevPin: NotePin = note.pins[0];
 						for (let pinIndex: number = 1; pinIndex < note.pins.length; pinIndex++) {
 							const nextPin: NotePin = note.pins[pinIndex];
@@ -2574,11 +2593,11 @@ export function removeDuplicatePatterns(channels: Channel[]): void {
 			for (let newPatternIndex: number = 0; newPatternIndex < newPatterns.length; newPatternIndex++) {
 				const newPattern: Pattern = newPatterns[newPatternIndex];
 				
-				if (!patternsContainSameInstruments(oldPattern.instruments, newPattern.instruments) || newPattern.notes.length != oldPattern.notes.length) {
+				if (!patternsContainSameInstruments(oldPattern.instruments, newPattern.instruments) || newPattern.notes.length != oldPattern.notes.length || newPattern.layers.length != oldPattern.layers.length) {
 					continue;
 				}
-				
-				if (comparePatternNotes(oldPattern.notes, newPattern.notes)) {
+
+				if (comparePatternNotes(oldPattern.notes, newPattern.notes) && oldPattern.layers.every((layer, i) => layer.length == newPattern.layers[i].length && comparePatternNotes(layer, newPattern.layers[i]))) {
 					foundMatchingPattern = true;
 					channel.bars[bar] = newPatternIndex + 1;
 					break;
@@ -2683,6 +2702,67 @@ export class ChangeReverb extends ChangeInstrumentSlider {
 	}
 }
 
+// A Pattern-shaped handle on one overlap layer, so changes written against
+// `pattern.notes` work on any layer.
+export function layerPattern(pattern: Pattern, layer: number): Pattern {
+	if (layer == 0) return pattern;
+	const view: Pattern = new Pattern();
+	view.notes = pattern.layers[layer - 1];
+	return view;
+}
+
+// Every note in every layer, sorted by start: the shape copy/paste and
+// pattern comparison use. Patterns without overlaps return `notes` itself.
+export function patternNotesInOrder(pattern: Pattern): Note[] {
+	if (!pattern.hasLayers()) return pattern.notes;
+	return pattern.allNotes().slice().sort((a, b) => a.start - b.start || a.end - b.end);
+}
+
+// Recomputes which overlap layer each note belongs to. Appended after any
+// change that may have created, removed or resized overlapping notes.
+export class ChangeRelayerPattern extends UndoableChange {
+	private readonly _oldNotes: Note[];
+	private readonly _oldLayers: Note[][];
+	private readonly _oldLayerNotes: Note[][];
+	private readonly _newNotes: Note[];
+	private readonly _newLayers: Note[][];
+	private readonly _newLayerNotes: Note[][];
+	constructor(private readonly _doc: SongDocument, private readonly _pattern: Pattern) {
+		super(false);
+		this._oldNotes = _pattern.notes.slice();
+		this._oldLayers = _pattern.layers;
+		this._oldLayerNotes = _pattern.layers.map(layer => layer.slice());
+		_pattern.relayer();
+		this._newNotes = _pattern.notes.slice();
+		this._newLayers = _pattern.layers;
+		this._newLayerNotes = _pattern.layers.map(layer => layer.slice());
+		const sameList = (a: Note[], b: Note[]): boolean => a.length == b.length && a.every((note, i) => note == b[i]);
+		if (!sameList(this._oldNotes, this._newNotes) || this._oldLayerNotes.length != this._newLayerNotes.length || !this._oldLayerNotes.every((layer, i) => sameList(layer, this._newLayerNotes[i]))) {
+			this._didSomething();
+			_doc.notifier.changed();
+		}
+	}
+
+	private _restore(notes: Note[], layers: Note[][], layerNotes: Note[][]): void {
+		this._pattern.notes.length = 0;
+		Array.prototype.push.apply(this._pattern.notes, notes);
+		this._pattern.layers = layers;
+		for (let i: number = 0; i < layers.length; i++) {
+			layers[i].length = 0;
+			Array.prototype.push.apply(layers[i], layerNotes[i]);
+		}
+		this._doc.notifier.changed();
+	}
+
+	protected _doForwards(): void {
+		this._restore(this._newNotes, this._newLayers, this._newLayerNotes);
+	}
+
+	protected _doBackwards(): void {
+		this._restore(this._oldNotes, this._oldLayers, this._oldLayerNotes);
+	}
+}
+
 export class ChangeNoteAdded extends UndoableChange {
 	private _doc: SongDocument;
 	private _pattern: Pattern;
@@ -2753,6 +2833,14 @@ export class ChangeNoteLength extends ChangePins {
 export class ChangeNoteTruncate extends ChangeSequence {
 	constructor(doc: SongDocument, pattern: Pattern, start: number, end: number, skipNote?: Note) {
 		super();
+		const hadLayers: boolean = pattern.layers.length > 0;
+		for (let layer: number = 0; layer < pattern.getLayerCount(); layer++) {
+			this._truncateLayer(doc, layerPattern(pattern, layer), start, end, skipNote);
+		}
+		if (hadLayers) this.append(new ChangeRelayerPattern(doc, pattern));
+	}
+
+	private _truncateLayer(doc: SongDocument, pattern: Pattern, start: number, end: number, skipNote?: Note): void {
 		let i: number = 0;
 		while (i < pattern.notes.length) {
 			const note: Note = pattern.notes[i];
@@ -2855,8 +2943,11 @@ class ChangeSplitNotesAtPoint extends ChangeSequence {
 class ChangeSplitNotesAtSelection extends ChangeSequence {
 	constructor(doc: SongDocument, pattern: Pattern) {
 		super();
-		this.append(new ChangeSplitNotesAtPoint(doc, pattern, doc.selection.patternSelectionStart));
-		this.append(new ChangeSplitNotesAtPoint(doc, pattern, doc.selection.patternSelectionEnd));
+		for (let layer: number = 0; layer < pattern.getLayerCount(); layer++) {
+			const layerView: Pattern = layerPattern(pattern, layer);
+			this.append(new ChangeSplitNotesAtPoint(doc, layerView, doc.selection.patternSelectionStart));
+			this.append(new ChangeSplitNotesAtPoint(doc, layerView, doc.selection.patternSelectionEnd));
+		}
 	}
 }
 
@@ -3002,7 +3093,7 @@ export class ChangeTranspose extends ChangeSequence {
 		if (doc.selection.patternSelectionActive) {
 			this.append(new ChangeSplitNotesAtSelection(doc, pattern));
 		}
-		for (const note of pattern.notes) {
+		for (const note of pattern.allNotes()) {
 			if (doc.selection.patternSelectionActive && (note.end <= doc.selection.patternSelectionStart || note.start >= doc.selection.patternSelectionEnd)) {
 				continue;
 			}
@@ -3087,18 +3178,23 @@ export class ChangeDragSelectedNotes extends ChangeSequence {
 		this.append(new ChangePatternSelection(doc, newStart, newEnd));
 		const draggedNotes = [];
 		let noteInsertionIndex: number = 0;
-		let i: number = 0;
-		while (i < pattern.notes.length) {
-			const note: Note = pattern.notes[i];
-			if (note.end <= oldStart || note.start >= oldEnd) {
-				i++;
-				if (note.end <= newStart) noteInsertionIndex = i;
-			} else {
-				draggedNotes.push(note.clone());
-				this.append(new ChangeNoteAdded(doc, pattern, note, i, true));
+		for (let layer: number = pattern.getLayerCount() - 1; layer >= 0; layer--) {
+			const layerView: Pattern = layerPattern(pattern, layer);
+			let i: number = 0;
+			while (i < layerView.notes.length) {
+				const note: Note = layerView.notes[i];
+				if (note.end <= oldStart || note.start >= oldEnd) {
+					i++;
+					if (layer == 0 && note.end <= newStart) noteInsertionIndex = i;
+				} else {
+					draggedNotes.push(note.clone());
+					this.append(new ChangeNoteAdded(doc, layerView, note, i, true));
+				}
 			}
 		}
-		
+		const mayOverlap: boolean = pattern.layers.length > 0;
+		if (mayOverlap) draggedNotes.sort((a, b) => a.start - b.start || a.end - b.end);
+
 		for (const note of draggedNotes) {
 			note.start += parts;
 			note.end += parts;
@@ -3113,6 +3209,7 @@ export class ChangeDragSelectedNotes extends ChangeSequence {
 				this.append(new ChangeTransposeNote(doc, channelIndex, note, transpose > 0, doc.prefs.notesOutsideScale));
 			}
 		}
+		if (mayOverlap) this.append(new ChangeRelayerPattern(doc, pattern));
 	}
 }
 
@@ -3143,7 +3240,7 @@ export class ChangeDuplicateSelectedReusedPatterns extends ChangeGroup {
 						this.append(new ChangeEnsurePatternExists(doc, channelIndex, bar));
 						const newPattern: Pattern | null = doc.song.getPattern(channelIndex, bar);
 						if (newPattern == null) throw new Error();
-						this.append(new ChangePaste(doc, newPattern, copiedPattern.notes, 0, Config.partsPerBeat * doc.song.beatsPerBar, Config.partsPerBeat * doc.song.beatsPerBar));
+						this.append(new ChangePaste(doc, newPattern, patternNotesInOrder(copiedPattern), 0, Config.partsPerBeat * doc.song.beatsPerBar, Config.partsPerBeat * doc.song.beatsPerBar));
 						
 						// Copy the instruments into the new pattern.
 						newPattern.instruments.length = 0;
@@ -3168,7 +3265,7 @@ export class ChangePatternScale extends Change {
 			new ChangeSplitNotesAtSelection(doc, pattern);
 		}
 		const maxPitch: number = Config.maxPitch;
-		for (const note of pattern.notes) {
+		for (const note of pattern.allNotes()) {
 			if (doc.selection.patternSelectionActive && (note.end <= doc.selection.patternSelectionStart || note.start >= doc.selection.patternSelectionEnd)) {
 				continue;
 			}

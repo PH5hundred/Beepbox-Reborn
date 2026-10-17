@@ -263,6 +263,7 @@ export class SongEditor {
 		option({value: "showStaff"}, "Show Staff Lines"),
 		option({value: "showFifth"}, 'Highlight "Fifth" of Song Key'),
 		option({value: "notesOutsideScale"}, "Allow Adding Notes Not in Scale"),
+		option({value: "allowOverlappingNotes"}, "Allow Overlapping Notes"),
 		option({value: "setDefaultScale"}, "Use Current Scale as Default"),
 		option({value: "showChannels"}, "Show Notes From All Channels"),
 		option({value: "showScrollBar"}, "Show Octave Scrollbar"),
@@ -1066,6 +1067,7 @@ export class SongEditor {
 			(prefs.showStaff ? "✓ " : "　") + "Show Staff Lines",
 			(prefs.showFifth ? "✓ " : "　") + 'Highlight "Fifth" of Song Key',
 			(prefs.notesOutsideScale ? "✓ " : "　") + "Allow Adding Notes Not in Scale",
+			(prefs.allowOverlappingNotes ? "✓ " : "　") + "Allow Overlapping Notes",
 			(prefs.defaultScale == this.doc.song.scale ? "✓ " : "　") + "Use Current Scale as Default",
 			(prefs.showChannels ? "✓ " : "　") + "Show Notes From All Channels",
 			(prefs.showScrollBar ? "✓ " : "　") + "Show Octave Scrollbar",
@@ -2373,6 +2375,9 @@ export class SongEditor {
 				break;
 			case "notesOutsideScale":
 				this.doc.prefs.notesOutsideScale = !this.doc.prefs.notesOutsideScale;
+				break;
+			case "allowOverlappingNotes":
+				this.doc.prefs.allowOverlappingNotes = !this.doc.prefs.allowOverlappingNotes;
 				break;
 			case "setDefaultScale":
 				this.doc.prefs.defaultScale = this.doc.song.scale;

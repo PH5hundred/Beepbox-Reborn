@@ -169,7 +169,8 @@ const enum SongTagCode {
 	masterVolume        = CharCode.Y, // added in Beepbox Reborn for the song-wide volume
 	barVolumes          = CharCode.Z, // added in Beepbox Reborn for per-measure volume
 	sampleSet           = CharCode.NUM_0, // added in Beepbox Reborn for the sample instrument's set name
-//	                    = CharCode.NUM_1,
+	noteLayers          = CharCode.NUM_1, // added in Beepbox Reborn for overlapping notes, encoded after the patterns
+
 //	                    = CharCode.NUM_2,
 //	                    = CharCode.NUM_3,
 //	                    = CharCode.NUM_4,
@@ -317,6 +318,12 @@ class BitFieldWriter {
 	}
 }
 
+interface NoteCodingState {
+	lastPitch: number;
+	readonly recentPitches: number[];
+	readonly recentShapes: any[];
+}
+
 export interface NotePin {
 	interval: number;
 	time: number;
@@ -391,8 +398,37 @@ export class Note {
 
 export class Pattern {
 	public notes: Note[] = [];
+	// Overlap layers beyond layer 0 (which is `notes`). Every layer is sorted and
+	// non-overlapping on its own, so code written for one note list works per layer.
+	public layers: Note[][] = [];
 	public readonly instruments: number[] = [0];
-	
+
+	public getLayerCount(): number {
+		return 1 + this.layers.length;
+	}
+
+	public getLayer(layer: number): Note[] {
+		return layer == 0 ? this.notes : (this.layers[layer - 1] || Pattern._emptyLayer);
+	}
+	private static readonly _emptyLayer: Note[] = [];
+
+	private static _isSortedWithoutOverlaps(notes: Note[]): boolean {
+		for (let i: number = 1; i < notes.length; i++) {
+			if (notes[i - 1].end > notes[i].start) return false;
+		}
+		return true;
+	}
+
+	public hasLayers(): boolean {
+		for (const layer of this.layers) if (layer.length > 0) return true;
+		return false;
+	}
+
+	public allNotes(): Note[] {
+		if (this.layers.length == 0) return this.notes;
+		return this.notes.concat(...this.layers);
+	}
+
 	public cloneNotes(): Note[] {
 		const result: Note[] = [];
 		for (const note of this.notes) {
@@ -400,16 +436,46 @@ export class Pattern {
 		}
 		return result;
 	}
-	
+
+	public cloneLayers(): Note[][] {
+		return this.layers.map(layer => layer.map(note => note.clone()));
+	}
+
+	// Re-sorts every note in every layer into the fewest non-overlapping layers,
+	// keeping as much as possible in layer 0. Arrays are reused so references to
+	// `notes` held elsewhere stay valid.
+	public relayer(): void {
+		if (this.layers.length == 0 && Pattern._isSortedWithoutOverlaps(this.notes)) return;
+		const all: Note[] = this.allNotes().slice();
+		all.sort((a, b) => a.start - b.start || a.end - b.end);
+		const result: Note[][] = [];
+		for (const note of all) {
+			let placed: boolean = false;
+			for (const layer of result) {
+				if (layer[layer.length - 1].end <= note.start) {
+					layer.push(note);
+					placed = true;
+					break;
+				}
+			}
+			if (!placed) result.push([note]);
+		}
+		const first: Note[] = result.shift() || [];
+		this.notes.length = 0;
+		Array.prototype.push.apply(this.notes, first);
+		this.layers = result;
+	}
+
 	public reset(): void {
 		this.notes.length = 0;
+		this.layers.length = 0;
 		this.instruments[0] = 0;
 		this.instruments.length = 1;
 	}
-	
-	public toJsonObject(song: Song): any {
+
+	private static _notesToJson(notes: Note[], song: Song): Object[] {
 		const noteArray: Object[] = [];
-		for (const note of this.notes) {
+		for (const note of notes) {
 			const pointArray: Object[] = [];
 			for (const pin of note.pins) {
 				pointArray.push({
@@ -418,7 +484,7 @@ export class Pattern {
 					"volume": Math.round(pin.size * 100 / 3),
 				});
 			}
-			
+
 			const noteObject: any = {
 				"pitches": note.pitches,
 				"points": pointArray,
@@ -428,8 +494,14 @@ export class Pattern {
 			}
 			noteArray.push(noteObject);
 		}
-		
-		const patternObject: any = {"notes": noteArray};
+		return noteArray;
+	}
+
+	public toJsonObject(song: Song): any {
+		const patternObject: any = {"notes": Pattern._notesToJson(this.notes, song)};
+		if (this.hasLayers()) {
+			patternObject["layers"] = this.layers.filter(layer => layer.length > 0).map(layer => Pattern._notesToJson(layer, song));
+		}
 		if (song.patternInstruments) {
 			patternObject["instruments"] = this.instruments.map(i => i + 1);
 		}
@@ -451,15 +523,27 @@ export class Pattern {
 			}
 		}
 		
-		if (patternObject["notes"] && patternObject["notes"].length > 0) {
-			const maxNoteCount: number = Math.min(song.beatsPerBar * Config.partsPerBeat, patternObject["notes"].length >>> 0);
-			
+		Pattern._notesFromJson(patternObject["notes"], this.notes, song, importedPartsPerBeat, isNoiseChannel);
+		if (Array.isArray(patternObject["layers"])) {
+			for (const layerObject of patternObject["layers"]) {
+				const layer: Note[] = [];
+				Pattern._notesFromJson(layerObject, layer, song, importedPartsPerBeat, isNoiseChannel);
+				if (layer.length > 0) this.layers.push(layer);
+			}
+			this.relayer();
+		}
+	}
+
+	private static _notesFromJson(noteObjects: any, target: Note[], song: Song, importedPartsPerBeat: number, isNoiseChannel: boolean): void {
+		if (noteObjects && noteObjects.length > 0) {
+			const maxNoteCount: number = Math.min(song.beatsPerBar * Config.partsPerBeat, noteObjects.length >>> 0);
+
 			// TODO: Consider supporting notes specified in any timing order, sorting them and truncating as necessary.
 			let tickClock: number = 0;
-			for (let j: number = 0; j < patternObject["notes"].length; j++) {
+			for (let j: number = 0; j < noteObjects.length; j++) {
 				if (j >= maxNoteCount) break;
-				
-				const noteObject = patternObject["notes"][j];
+
+				const noteObject = noteObjects[j];
 				if (!noteObject || !noteObject["pitches"] || !(noteObject["pitches"].length >= 1) || !noteObject["points"] || !(noteObject["points"].length >= 2)) {
 					continue;
 				}
@@ -539,7 +623,7 @@ export class Pattern {
 					note.continuesLastPattern = false;
 				}
 				
-				this.notes.push(note);
+				target.push(note);
 				tickClock = note.end;
 			}
 		}
@@ -2177,12 +2261,7 @@ export class Song {
 			const neededInstrumentIndexBits: number = Song.getNeededBits(channel.instruments.length - 1);
 			const isNoiseChannel: boolean = this.getChannelIsNoise(channelIndex);
 			const octaveOffset: number = isNoiseChannel ? 0 : channel.octave * Config.pitchesPerOctave;
-			let lastPitch: number = (isNoiseChannel ? 4 : octaveOffset);
-			const recentPitches: number[] = isNoiseChannel ? [4,6,7,2,3,8,0,10] : [0, 7, 12, 19, 24, -5, -12];
-			const recentShapes: string[] = [];
-			for (let i: number = 0; i < recentPitches.length; i++) {
-				recentPitches[i] += octaveOffset;
-			}
+			const state: NoteCodingState = Song._newNoteCodingState(isNoiseChannel, octaveOffset);
 			for (const pattern of channel.patterns) {
 				if (this.patternInstruments) {
 					const instrumentCount: number = validateRange(Config.instrumentCountMin, maxInstrumentsPerPattern, pattern.instruments.length);
@@ -2191,110 +2270,67 @@ export class Song {
 						bits.write(neededInstrumentIndexBits, pattern.instruments[i]);
 					}
 				}
-				
+
 				if (pattern.notes.length > 0) {
 					bits.write(1, 1);
-					
-					let curPart: number = 0;
-					for (const note of pattern.notes) {
-						if (note.start > curPart) {
-							bits.write(2, 0); // rest
-							bits.writePartDuration(note.start - curPart);
-						}
-						
-						shapeBits.clear();
-						
-						// 0: 1 pitch, 10: 2 pitches, 110: 3 pitches, 111: 4 pitches
-						for (let i: number = 1; i < note.pitches.length; i++) shapeBits.write(1,1);
-						if (note.pitches.length < Config.maxChordSize) shapeBits.write(1,0);
-						
-						shapeBits.writePinCount(note.pins.length - 1);
-						
-						shapeBits.write(bitsPerNoteSize, note.pins[0].size);
-						
-						let shapePart: number = 0;
-						let startPitch: number = note.pitches[0];
-						let currentPitch: number = startPitch;
-						const pitchBends: number[] = [];
-						for (let i: number = 1; i < note.pins.length; i++) {
-							const pin: NotePin = note.pins[i];
-							const nextPitch: number = startPitch + pin.interval;
-							if (currentPitch != nextPitch) {
-								shapeBits.write(1, 1);
-								pitchBends.push(nextPitch);
-								currentPitch = nextPitch;
-							} else {
-								shapeBits.write(1, 0);
-							}
-							shapeBits.writePartDuration(pin.time - shapePart);
-							shapePart = pin.time;
-							shapeBits.write(bitsPerNoteSize, pin.size);
-						}
-						
-						const shapeString: string = String.fromCharCode.apply(null, shapeBits.encodeBase64([]));
-						const shapeIndex: number = recentShapes.indexOf(shapeString);
-						if (shapeIndex == -1) {
-							bits.write(2, 1); // new shape
-							bits.concat(shapeBits);
-						} else {
-							bits.write(1, 1); // old shape
-							bits.writeLongTail(0, 0, shapeIndex);
-							recentShapes.splice(shapeIndex, 1);
-						}
-						recentShapes.unshift(shapeString);
-						if (recentShapes.length > 10) recentShapes.pop();
-						
-						const allPitches: number[] = note.pitches.concat(pitchBends);
-						for (let i: number = 0; i < allPitches.length; i++) {
-							const pitch: number = allPitches[i];
-							const pitchIndex: number = recentPitches.indexOf(pitch);
-							if (pitchIndex == -1) {
-								let interval: number = 0;
-								let pitchIter: number = lastPitch;
-								if (pitchIter < pitch) {
-									while (pitchIter != pitch) {
-										pitchIter++;
-										if (recentPitches.indexOf(pitchIter) == -1) interval++;
-									}
-								} else {
-									while (pitchIter != pitch) {
-										pitchIter--;
-										if (recentPitches.indexOf(pitchIter) == -1) interval--;
-									}
-								}
-								bits.write(1, 0);
-								bits.writePitchInterval(interval);
-							} else {
-								bits.write(1, 1);
-								bits.write(3, pitchIndex);
-								recentPitches.splice(pitchIndex, 1);
-							}
-							recentPitches.unshift(pitch);
-							if (recentPitches.length > 8) recentPitches.pop();
-							
-							if (i == note.pitches.length - 1) {
-								lastPitch = note.pitches[0];
-							} else {
-								lastPitch = pitch;
-							}
-						}
-						
-						if (note.start == 0) {
-							bits.write(1, note.continuesLastPattern ? 1 : 0);
-						}
-						
-						curPart = note.end;
-					}
-					
-					if (curPart < this.beatsPerBar * Config.partsPerBeat) {
-						bits.write(2, 0); // rest
-						bits.writePartDuration(this.beatsPerBar * Config.partsPerBeat - curPart);
-					}
+					this._encodeNoteList(bits, shapeBits, pattern.notes, bitsPerNoteSize, state);
 				} else {
 					bits.write(1, 0);
 				}
 			}
 		}
+		Song._appendBitsWithLength(buffer, bits);
+
+		if (this._hasNoteLayers()) {
+			buffer.push(SongTagCode.noteLayers);
+			bits = new BitFieldWriter();
+			for (let channelIndex: number = 0; channelIndex < this.getChannelCount(); channelIndex++) {
+				const channel: Channel = this.channels[channelIndex];
+				const isNoiseChannel: boolean = this.getChannelIsNoise(channelIndex);
+				const octaveOffset: number = isNoiseChannel ? 0 : channel.octave * Config.pitchesPerOctave;
+				const state: NoteCodingState = Song._newNoteCodingState(isNoiseChannel, octaveOffset);
+				for (const pattern of channel.patterns) {
+					const layers: Note[][] = pattern.layers.filter(layer => layer.length > 0);
+					bits.writeLongTail(0, 0, layers.length);
+					for (const layer of layers) {
+						this._encodeNoteList(bits, shapeBits, layer, bitsPerNoteSize, state);
+					}
+				}
+			}
+			Song._appendBitsWithLength(buffer, bits);
+		}
+
+		const maxApplyArgs: number = 64000;
+		if (buffer.length < maxApplyArgs) {
+			// Note: Function.apply may break for long argument lists.
+			return String.fromCharCode.apply(null, buffer);
+		} else {
+			let result: string = "";
+			for (let i: number = 0; i < buffer.length; i += maxApplyArgs) {
+				result += String.fromCharCode.apply(null, buffer.slice(i, i + maxApplyArgs));
+			}
+			return result;
+		}
+	}
+
+	private _hasNoteLayers(): boolean {
+		for (let channelIndex: number = 0; channelIndex < this.getChannelCount(); channelIndex++) {
+			for (const pattern of this.channels[channelIndex].patterns) {
+				if (pattern.hasLayers()) return true;
+			}
+		}
+		return false;
+	}
+
+	private static _newNoteCodingState(isNoiseChannel: boolean, octaveOffset: number): NoteCodingState {
+		const recentPitches: number[] = isNoiseChannel ? [4,6,7,2,3,8,0,10] : [0, 7, 12, 19, 24, -5, -12];
+		for (let i: number = 0; i < recentPitches.length; i++) {
+			recentPitches[i] += octaveOffset;
+		}
+		return {lastPitch: (isNoiseChannel ? 4 : octaveOffset), recentPitches: recentPitches, recentShapes: []};
+	}
+
+	private static _appendBitsWithLength(buffer: number[], bits: BitFieldWriter): void {
 		let stringLength: number = bits.lengthBase64();
 		let digits: number[] = [];
 		while (stringLength > 0) {
@@ -2304,18 +2340,108 @@ export class Song {
 		buffer.push(base64IntToCharCode[digits.length]);
 		Array.prototype.push.apply(buffer, digits); // append digits to buffer.
 		bits.encodeBase64(buffer);
-		
-		const maxApplyArgs: number = 64000;
-		if (buffer.length < maxApplyArgs) {
-			// Note: Function.apply may break for long argument lists. 
-			return String.fromCharCode.apply(null, buffer);
-		} else {
-			let result: string = "";
-			for (let i: number = 0; i < buffer.length; i += maxApplyArgs) {
-				result += String.fromCharCode.apply(null, buffer.slice(i, i + maxApplyArgs));
+	}
+
+	private _encodeNoteList(bits: BitFieldWriter, shapeBits: BitFieldWriter, notes: Note[], bitsPerNoteSize: number, state: NoteCodingState): void {
+		const recentPitches: number[] = state.recentPitches;
+		const recentShapes: any[] = state.recentShapes;
+		let lastPitch: number = state.lastPitch;
+		let curPart: number = 0;
+		for (const note of notes) {
+			if (note.start > curPart) {
+				bits.write(2, 0); // rest
+				bits.writePartDuration(note.start - curPart);
 			}
-			return result;
+			
+			shapeBits.clear();
+			
+			// 0: 1 pitch, 10: 2 pitches, 110: 3 pitches, 111: 4 pitches
+			for (let i: number = 1; i < note.pitches.length; i++) shapeBits.write(1,1);
+			if (note.pitches.length < Config.maxChordSize) shapeBits.write(1,0);
+			
+			shapeBits.writePinCount(note.pins.length - 1);
+			
+			shapeBits.write(bitsPerNoteSize, note.pins[0].size);
+			
+			let shapePart: number = 0;
+			let startPitch: number = note.pitches[0];
+			let currentPitch: number = startPitch;
+			const pitchBends: number[] = [];
+			for (let i: number = 1; i < note.pins.length; i++) {
+				const pin: NotePin = note.pins[i];
+				const nextPitch: number = startPitch + pin.interval;
+				if (currentPitch != nextPitch) {
+					shapeBits.write(1, 1);
+					pitchBends.push(nextPitch);
+					currentPitch = nextPitch;
+				} else {
+					shapeBits.write(1, 0);
+				}
+				shapeBits.writePartDuration(pin.time - shapePart);
+				shapePart = pin.time;
+				shapeBits.write(bitsPerNoteSize, pin.size);
+			}
+			
+			const shapeString: string = String.fromCharCode.apply(null, shapeBits.encodeBase64([]));
+			const shapeIndex: number = recentShapes.indexOf(shapeString);
+			if (shapeIndex == -1) {
+				bits.write(2, 1); // new shape
+				bits.concat(shapeBits);
+			} else {
+				bits.write(1, 1); // old shape
+				bits.writeLongTail(0, 0, shapeIndex);
+				recentShapes.splice(shapeIndex, 1);
+			}
+			recentShapes.unshift(shapeString);
+			if (recentShapes.length > 10) recentShapes.pop();
+			
+			const allPitches: number[] = note.pitches.concat(pitchBends);
+			for (let i: number = 0; i < allPitches.length; i++) {
+				const pitch: number = allPitches[i];
+				const pitchIndex: number = recentPitches.indexOf(pitch);
+				if (pitchIndex == -1) {
+					let interval: number = 0;
+					let pitchIter: number = lastPitch;
+					if (pitchIter < pitch) {
+						while (pitchIter != pitch) {
+							pitchIter++;
+							if (recentPitches.indexOf(pitchIter) == -1) interval++;
+						}
+					} else {
+						while (pitchIter != pitch) {
+							pitchIter--;
+							if (recentPitches.indexOf(pitchIter) == -1) interval--;
+						}
+					}
+					bits.write(1, 0);
+					bits.writePitchInterval(interval);
+				} else {
+					bits.write(1, 1);
+					bits.write(3, pitchIndex);
+					recentPitches.splice(pitchIndex, 1);
+				}
+				recentPitches.unshift(pitch);
+				if (recentPitches.length > 8) recentPitches.pop();
+				
+				if (i == note.pitches.length - 1) {
+					lastPitch = note.pitches[0];
+				} else {
+					lastPitch = pitch;
+				}
+			}
+			
+			if (note.start == 0) {
+				bits.write(1, note.continuesLastPattern ? 1 : 0);
+			}
+			
+			curPart = note.end;
 		}
+
+		if (curPart < this.beatsPerBar * Config.partsPerBeat) {
+			bits.write(2, 0); // rest
+			bits.writePartDuration(this.beatsPerBar * Config.partsPerBeat - curPart);
+		}
+		state.lastPitch = lastPitch;
 	}
 	
 	private static _envelopeFromLegacyIndex(legacyIndex: number): Envelope {
@@ -3213,15 +3339,11 @@ export class Song {
 					const neededInstrumentIndexBits: number = Song.getNeededBits(channel.instruments.length - 1);
 					
 					const octaveOffset: number = isNoiseChannel ? 0 : channel.octave * 12;
-					let lastPitch: number = (isNoiseChannel ? 4 : octaveOffset);
-					const recentPitches: number[] = isNoiseChannel ? [4,6,7,2,3,8,0,10] : [0, 7, 12, 19, 24, -5, -12];
-					const recentShapes: any[] = [];
-					for (let i: number = 0; i < recentPitches.length; i++) {
-						recentPitches[i] += octaveOffset;
-					}
+					const state: NoteCodingState = Song._newNoteCodingState(isNoiseChannel, octaveOffset);
 					for (let i: number = 0; i < this.patternsPerChannel; i++) {
 						const newPattern: Pattern = channel.patterns[i];
-						
+						newPattern.layers.length = 0;
+
 						if (beforeNine) {
 							newPattern.instruments[0] = validateRange(0, channel.instruments.length - 1, bits.read(neededInstrumentIndexBits));
 							newPattern.instruments.length = 1;
@@ -3242,140 +3364,10 @@ export class Song {
 							newPattern.notes.length = 0;
 							continue;
 						}
-						
-						let curPart: number = 0;
-						const newNotes: Note[] = newPattern.notes;
-						let noteCount: number = 0;
-						while (curPart < this.beatsPerBar * Config.partsPerBeat) {
-							
-							const useOldShape: boolean = bits.read(1) == 1;
-							let newNote: boolean = false;
-							let shapeIndex: number = 0;
-							if (useOldShape) {
-								shapeIndex = validateRange(0, recentShapes.length - 1, bits.readLongTail(0, 0));
-							} else {
-								newNote = bits.read(1) == 1;
-							}
-							
-							if (!useOldShape && !newNote) {
-								const restLength: number = beforeSeven
-									? bits.readLegacyPartDuration() * Config.partsPerBeat / Config.rhythms[this.rhythm].stepsPerBeat
-									: bits.readPartDuration();
-								curPart += restLength;
-							} else {
-								let shape: any;
-								if (useOldShape) {
-									shape = recentShapes[shapeIndex];
-									recentShapes.splice(shapeIndex, 1);
-								} else {
-									shape = {};
-									
-									shape.pitchCount = 1;
-									while (shape.pitchCount < Config.maxChordSize && bits.read(1) == 1) shape.pitchCount++;
-									
-									shape.pinCount = bits.readPinCount();
-									shape.initialSize = bits.read(bitsPerNoteSize);
-									
-									shape.pins = [];
-									shape.length = 0;
-									shape.bendCount = 0;
-									for (let j: number = 0; j < shape.pinCount; j++) {
-										let pinObj: any = {};
-										pinObj.pitchBend = bits.read(1) == 1;
-										if (pinObj.pitchBend) shape.bendCount++;
-										shape.length += beforeSeven
-											? bits.readLegacyPartDuration() * Config.partsPerBeat / Config.rhythms[this.rhythm].stepsPerBeat
-											: bits.readPartDuration();
-										pinObj.time = shape.length;
-										pinObj.size = bits.read(bitsPerNoteSize);
-										shape.pins.push(pinObj);
-									}
-								}
-								recentShapes.unshift(shape);
-								if (recentShapes.length > 10) recentShapes.pop(); // TODO: Use Deque?
-								
-								let note: Note;
-								if (newNotes.length <= noteCount) {
-									note = new Note(0, curPart, curPart + shape.length, shape.initialSize);
-									newNotes[noteCount++] = note;
-								} else {
-									note = newNotes[noteCount++];
-									note.start = curPart;
-									note.end = curPart + shape.length;
-									note.pins[0].size = shape.initialSize;
-								}
-								
-								let pitch: number;
-								let pitchCount: number = 0;
-								const pitchBends: number[] = []; // TODO: allocate this array only once! keep separate length and iterator index. Use Deque?
-								for (let j: number = 0; j < shape.pitchCount + shape.bendCount; j++) {
-									const useOldPitch: boolean = bits.read(1) == 1;
-									if (!useOldPitch) {
-										const interval: number = bits.readPitchInterval();
-										pitch = lastPitch;
-										let intervalIter: number = interval;
-										while (intervalIter > 0) {
-											pitch++;
-											while (recentPitches.indexOf(pitch) != -1) pitch++;
-											intervalIter--;
-										}
-										while (intervalIter < 0) {
-											pitch--;
-											while (recentPitches.indexOf(pitch) != -1) pitch--;
-											intervalIter++;
-										}
-									} else {
-										const pitchIndex: number = validateRange(0, recentPitches.length - 1, bits.read(3));
-										pitch = recentPitches[pitchIndex];
-										recentPitches.splice(pitchIndex, 1);
-									}
-									
-									recentPitches.unshift(pitch);
-									if (recentPitches.length > 8) recentPitches.pop();
-									
-									if (j < shape.pitchCount) {
-										note.pitches[pitchCount++] = pitch;
-									} else {
-										pitchBends.push(pitch);
-									}
-									
-									if (j == shape.pitchCount - 1) {
-										lastPitch = note.pitches[0];
-									} else {
-										lastPitch = pitch;
-									}
-								}
-								note.pitches.length = pitchCount;
-								pitchBends.unshift(note.pitches[0]); // TODO: Use Deque?
-								
-								let pinCount: number = 1;
-								for (const pinObj of shape.pins) {
-									if (pinObj.pitchBend) pitchBends.shift();
-									
-									const interval: number = pitchBends[0] - note.pitches[0];
-									if (note.pins.length <= pinCount) {
-										note.pins[pinCount++] = makeNotePin(interval, pinObj.time, pinObj.size);
-									} else {
-										const pin: NotePin = note.pins[pinCount++];
-										pin.interval = interval;
-										pin.time = pinObj.time;
-										pin.size = pinObj.size;
-									}
-								}
-								note.pins.length = pinCount;
-								
-								if (note.start == 0 && !beforeNine) {
-									note.continuesLastPattern = (bits.read(1) == 1);
-								} else {
-									note.continuesLastPattern = false;
-								}
-								
-								curPart = validateRange(0, this.beatsPerBar * Config.partsPerBeat, note.end);
-							}
-						}
-						newNotes.length = noteCount;
+
+						this._decodeNoteList(bits, newPattern.notes, bitsPerNoteSize, state, beforeSeven, beforeNine);
 					}
-					
+
 					if (beforeThree) {
 						break;
 					} else {
@@ -3383,6 +3375,35 @@ export class Song {
 						if (channelIndex >= this.getChannelCount()) break;
 					}
 				} // while (true)
+			} break;
+			case SongTagCode.noteLayers: {
+				let bitStringLength: number = 0;
+				let bitStringLengthLength: number = validateRange(1, 4, base64CharCodeToInt[compressed.charCodeAt(charIndex++)]);
+				while (bitStringLengthLength > 0) {
+					bitStringLength = bitStringLength << 6;
+					bitStringLength += base64CharCodeToInt[compressed.charCodeAt(charIndex++)];
+					bitStringLengthLength--;
+				}
+				const bits: BitFieldReader = new BitFieldReader(compressed, charIndex, charIndex + bitStringLength);
+				charIndex += bitStringLength;
+				const bitsPerNoteSize: number = Song.getNeededBits(Config.noteSizeMax);
+				for (let channelIndex: number = 0; channelIndex < this.getChannelCount(); channelIndex++) {
+					const channel: Channel = this.channels[channelIndex];
+					const isNoiseChannel: boolean = this.getChannelIsNoise(channelIndex);
+					const octaveOffset: number = isNoiseChannel ? 0 : channel.octave * 12;
+					const state: NoteCodingState = Song._newNoteCodingState(isNoiseChannel, octaveOffset);
+					for (let i: number = 0; i < this.patternsPerChannel; i++) {
+						const pattern: Pattern = channel.patterns[i];
+						const layerCount: number = Math.min(Config.partsPerBeat * this.beatsPerBar, bits.readLongTail(0, 0));
+						pattern.layers.length = 0;
+						for (let j: number = 0; j < layerCount; j++) {
+							const layer: Note[] = [];
+							this._decodeNoteList(bits, layer, bitsPerNoteSize, state, false, false);
+							if (layer.length > 0) pattern.layers.push(layer);
+						}
+						pattern.relayer();
+					}
+				}
 			} break;
 			default: {
 				throw new Error("Unrecognized song tag code " + String.fromCharCode(command) + " at index " + (charIndex - 1));
@@ -3392,6 +3413,143 @@ export class Song {
 		// barCount is encoded after the repeat sections, so this can only be
 		// checked once the whole string has been read.
 		this.repeatSections = sanitizeRepeatSections(this.repeatSections, this.barCount);
+	}
+
+	private _decodeNoteList(bits: BitFieldReader, newNotes: Note[], bitsPerNoteSize: number, state: NoteCodingState, beforeSeven: boolean, beforeNine: boolean): void {
+		const recentPitches: number[] = state.recentPitches;
+		const recentShapes: any[] = state.recentShapes;
+		let lastPitch: number = state.lastPitch;
+		let curPart: number = 0;
+		let noteCount: number = 0;
+		while (curPart < this.beatsPerBar * Config.partsPerBeat) {
+			
+			const useOldShape: boolean = bits.read(1) == 1;
+			let newNote: boolean = false;
+			let shapeIndex: number = 0;
+			if (useOldShape) {
+				shapeIndex = validateRange(0, recentShapes.length - 1, bits.readLongTail(0, 0));
+			} else {
+				newNote = bits.read(1) == 1;
+			}
+			
+			if (!useOldShape && !newNote) {
+				const restLength: number = beforeSeven
+					? bits.readLegacyPartDuration() * Config.partsPerBeat / Config.rhythms[this.rhythm].stepsPerBeat
+					: bits.readPartDuration();
+				curPart += restLength;
+			} else {
+				let shape: any;
+				if (useOldShape) {
+					shape = recentShapes[shapeIndex];
+					recentShapes.splice(shapeIndex, 1);
+				} else {
+					shape = {};
+					
+					shape.pitchCount = 1;
+					while (shape.pitchCount < Config.maxChordSize && bits.read(1) == 1) shape.pitchCount++;
+					
+					shape.pinCount = bits.readPinCount();
+					shape.initialSize = bits.read(bitsPerNoteSize);
+					
+					shape.pins = [];
+					shape.length = 0;
+					shape.bendCount = 0;
+					for (let j: number = 0; j < shape.pinCount; j++) {
+						let pinObj: any = {};
+						pinObj.pitchBend = bits.read(1) == 1;
+						if (pinObj.pitchBend) shape.bendCount++;
+						shape.length += beforeSeven
+							? bits.readLegacyPartDuration() * Config.partsPerBeat / Config.rhythms[this.rhythm].stepsPerBeat
+							: bits.readPartDuration();
+						pinObj.time = shape.length;
+						pinObj.size = bits.read(bitsPerNoteSize);
+						shape.pins.push(pinObj);
+					}
+				}
+				recentShapes.unshift(shape);
+				if (recentShapes.length > 10) recentShapes.pop(); // TODO: Use Deque?
+				
+				let note: Note;
+				if (newNotes.length <= noteCount) {
+					note = new Note(0, curPart, curPart + shape.length, shape.initialSize);
+					newNotes[noteCount++] = note;
+				} else {
+					note = newNotes[noteCount++];
+					note.start = curPart;
+					note.end = curPart + shape.length;
+					note.pins[0].size = shape.initialSize;
+				}
+				
+				let pitch: number;
+				let pitchCount: number = 0;
+				const pitchBends: number[] = []; // TODO: allocate this array only once! keep separate length and iterator index. Use Deque?
+				for (let j: number = 0; j < shape.pitchCount + shape.bendCount; j++) {
+					const useOldPitch: boolean = bits.read(1) == 1;
+					if (!useOldPitch) {
+						const interval: number = bits.readPitchInterval();
+						pitch = lastPitch;
+						let intervalIter: number = interval;
+						while (intervalIter > 0) {
+							pitch++;
+							while (recentPitches.indexOf(pitch) != -1) pitch++;
+							intervalIter--;
+						}
+						while (intervalIter < 0) {
+							pitch--;
+							while (recentPitches.indexOf(pitch) != -1) pitch--;
+							intervalIter++;
+						}
+					} else {
+						const pitchIndex: number = validateRange(0, recentPitches.length - 1, bits.read(3));
+						pitch = recentPitches[pitchIndex];
+						recentPitches.splice(pitchIndex, 1);
+					}
+					
+					recentPitches.unshift(pitch);
+					if (recentPitches.length > 8) recentPitches.pop();
+					
+					if (j < shape.pitchCount) {
+						note.pitches[pitchCount++] = pitch;
+					} else {
+						pitchBends.push(pitch);
+					}
+					
+					if (j == shape.pitchCount - 1) {
+						lastPitch = note.pitches[0];
+					} else {
+						lastPitch = pitch;
+					}
+				}
+				note.pitches.length = pitchCount;
+				pitchBends.unshift(note.pitches[0]); // TODO: Use Deque?
+				
+				let pinCount: number = 1;
+				for (const pinObj of shape.pins) {
+					if (pinObj.pitchBend) pitchBends.shift();
+					
+					const interval: number = pitchBends[0] - note.pitches[0];
+					if (note.pins.length <= pinCount) {
+						note.pins[pinCount++] = makeNotePin(interval, pinObj.time, pinObj.size);
+					} else {
+						const pin: NotePin = note.pins[pinCount++];
+						pin.interval = interval;
+						pin.time = pinObj.time;
+						pin.size = pinObj.size;
+					}
+				}
+				note.pins.length = pinCount;
+				
+				if (note.start == 0 && !beforeNine) {
+					note.continuesLastPattern = (bits.read(1) == 1);
+				} else {
+					note.continuesLastPattern = false;
+				}
+				
+				curPart = validateRange(0, this.beatsPerBar * Config.partsPerBeat, note.end);
+			}
+		}
+		newNotes.length = noteCount;
+		state.lastPitch = lastPitch;
 	}
 
 	public toJsonObject(enableIntro: boolean = true, loopCount: number = 1, enableOutro: boolean = true): Object {
@@ -4218,9 +4376,22 @@ class InstrumentState {
 	public attentuationProgress: number = 0.0; // How long since an active tone introduced an input signal to the delay lines, normalized from 0 to 1 based on how long to wait until the delay lines signal will have audibly dissapated.
 	public flushedSamples: number = 0; // How many delay line samples have been flushed to zero.
 	public readonly activeTones: Deque<Tone> = new Deque<Tone>();
+	public readonly layerTones: Deque<Tone>[] = []; // Active tones for a pattern's overlap layers beyond layer 0, which uses activeTones.
 	public readonly releasedTones: Deque<Tone> = new Deque<Tone>(); // Tones that are in the process of fading out after the corresponding notes ended.
 	public readonly liveInputTones: Deque<Tone> = new Deque<Tone>(); // Tones that are initiated by a source external to the loaded song data.
 	
+	public getLayerTones(layer: number): Deque<Tone> {
+		if (layer == 0) return this.activeTones;
+		while (this.layerTones.length < layer) this.layerTones.push(new Deque<Tone>());
+		return this.layerTones[layer - 1];
+	}
+
+	public activeToneCount(): number {
+		let count: number = this.activeTones.count();
+		for (const tones of this.layerTones) count += tones.count();
+		return count;
+	}
+
 	public type: InstrumentType = InstrumentType.chip;
 	public synthesizer: Function | null = null;
 	public wave: Float32Array | null = null;
@@ -5213,7 +5384,7 @@ export class Synth {
 					const instrumentState: InstrumentState = channelState.instruments[instrumentIndex];
 					
 					if (this.isAtStartOfTick) {
-						let tonesPlayedInThisInstrument: number = instrumentState.activeTones.count() + instrumentState.liveInputTones.count();
+						let tonesPlayedInThisInstrument: number = instrumentState.activeToneCount() + instrumentState.liveInputTones.count();
 						for (let i: number = 0; i < instrumentState.releasedTones.count(); i++) {
 							const tone: Tone = instrumentState.releasedTones.get(i);
 							if (tone.ticksSinceReleased >= Math.abs(instrument.getFadeOutTicks())) {
@@ -5239,7 +5410,12 @@ export class Synth {
 						const tone: Tone = instrumentState.activeTones.get(i);
 						this.playTone(channelIndex, bufferIndex, runLength, tone);
 					}
-					
+					for (const layerTones of instrumentState.layerTones) {
+						for (let i: number = 0; i < layerTones.count(); i++) {
+							this.playTone(channelIndex, bufferIndex, runLength, layerTones.get(i));
+						}
+					}
+
 					for (let i: number = 0; i < instrumentState.liveInputTones.count(); i++) {
 						const tone: Tone = instrumentState.liveInputTones.get(i);
 						this.playTone(channelIndex, bufferIndex, runLength, tone);
@@ -5423,6 +5599,9 @@ export class Synth {
 		for (const channelState of this.channels) {
 			for (const instrumentState of channelState.instruments) {
 				while (instrumentState.activeTones.count()    > 0) this.freeTone(instrumentState.activeTones.popBack());
+				for (const layerTones of instrumentState.layerTones) {
+					while (layerTones.count() > 0) this.freeTone(layerTones.popBack());
+				}
 				while (instrumentState.releasedTones.count()  > 0) this.freeTone(instrumentState.releasedTones.popBack());
 				while (instrumentState.liveInputTones.count() > 0) this.freeTone(instrumentState.liveInputTones.popBack());
 			}
@@ -5590,48 +5769,68 @@ export class Synth {
 		const channel: Channel = song.channels[channelIndex];
 		const channelState: ChannelState = this.channels[channelIndex];
 		const pattern: Pattern | null = song.getPattern(channelIndex, this.bar);
-		const currentPart: number = this.getCurrentPart();
-		const currentTick: number = this.tick + Config.ticksPerPart * currentPart;
-		let note: Note | null = null;
-		let prevNote: Note | null = null;
-		let nextNote: Note | null = null;
-		
-		if (playSong && pattern != null && !channel.muted && (!this.isRecording || this.liveInputChannel != channelIndex)) {
-			for (let i: number = 0; i < pattern.notes.length; i++) {
-				if (pattern.notes[i].end <= currentPart) {
-					prevNote = pattern.notes[i];
-				} else if (pattern.notes[i].start <= currentPart && pattern.notes[i].end > currentPart) {
-					note = pattern.notes[i];
-				} else if (pattern.notes[i].start > currentPart) {
-					nextNote = pattern.notes[i];
-					break;
-				}
-			}
-			
-			if (note != null) {
-				if (prevNote != null && prevNote.end != note.start) prevNote = null;
-				if (nextNote != null && nextNote.start != note.end) nextNote = null;
-			}
-		}
-		
+
 		// Seamless tones from a pattern with a single instrument can be transferred to a different single seamless instrument in the next pattern.
 		if (pattern != null && (!song.layeredInstruments || channel.instruments.length == 1 || (song.patternInstruments && pattern.instruments.length == 1))) {
 			const newInstrumentIndex: number = song.patternInstruments ? pattern.instruments[0] : 0;
 			if (channelState.singleSeamlessInstrument != null && channelState.singleSeamlessInstrument != newInstrumentIndex && channelState.singleSeamlessInstrument < channelState.instruments.length) {
 				const sourceInstrumentState: InstrumentState = channelState.instruments[channelState.singleSeamlessInstrument];
 				const destInstrumentState: InstrumentState = channelState.instruments[newInstrumentIndex];
-				while (sourceInstrumentState.activeTones.count() > 0) {
-					destInstrumentState.activeTones.pushFront(sourceInstrumentState.activeTones.popBack());
+				for (let layer: number = 0; layer <= sourceInstrumentState.layerTones.length; layer++) {
+					const sourceTones: Deque<Tone> = sourceInstrumentState.getLayerTones(layer);
+					const destTones: Deque<Tone> = destInstrumentState.getLayerTones(layer);
+					while (sourceTones.count() > 0) {
+						destTones.pushFront(sourceTones.popBack());
+					}
 				}
 			}
 			channelState.singleSeamlessInstrument = newInstrumentIndex;
 		} else {
 			channelState.singleSeamlessInstrument = null;
 		}
-		
+
+		// Each overlap layer is an independent note sequence with its own tones.
+		// Layers that disappeared still get a pass so their tones are released.
+		let layerCount: number = (pattern == null) ? 1 : pattern.getLayerCount();
+		for (let instrumentIndex: number = 0; instrumentIndex < channel.instruments.length; instrumentIndex++) {
+			layerCount = Math.max(layerCount, 1 + channelState.instruments[instrumentIndex].layerTones.length);
+		}
+		for (let layer: number = 0; layer < layerCount; layer++) {
+			this.determineCurrentActiveTonesForLayer(song, channelIndex, samplesPerTick, playSong, pattern, layer);
+		}
+	}
+
+	private determineCurrentActiveTonesForLayer(song: Song, channelIndex: number, samplesPerTick: number, playSong: boolean, pattern: Pattern | null, layer: number): void {
+		const channel: Channel = song.channels[channelIndex];
+		const channelState: ChannelState = this.channels[channelIndex];
+		const currentPart: number = this.getCurrentPart();
+		const currentTick: number = this.tick + Config.ticksPerPart * currentPart;
+		let note: Note | null = null;
+		let prevNote: Note | null = null;
+		let nextNote: Note | null = null;
+
+		if (playSong && pattern != null && !channel.muted && (!this.isRecording || this.liveInputChannel != channelIndex)) {
+			const notes: Note[] = pattern.getLayer(layer);
+			for (let i: number = 0; i < notes.length; i++) {
+				if (notes[i].end <= currentPart) {
+					prevNote = notes[i];
+				} else if (notes[i].start <= currentPart && notes[i].end > currentPart) {
+					note = notes[i];
+				} else if (notes[i].start > currentPart) {
+					nextNote = notes[i];
+					break;
+				}
+			}
+
+			if (note != null) {
+				if (prevNote != null && prevNote.end != note.start) prevNote = null;
+				if (nextNote != null && nextNote.start != note.end) nextNote = null;
+			}
+		}
+
 		for (let instrumentIndex: number = 0; instrumentIndex < channel.instruments.length; instrumentIndex++) {
 			const instrumentState: InstrumentState = channelState.instruments[instrumentIndex];
-			const toneList: Deque<Tone> = instrumentState.activeTones;
+			const toneList: Deque<Tone> = instrumentState.getLayerTones(layer);
 			let toneCount: number = 0;
 			if ((note != null) && (!song.patternInstruments || (pattern!.instruments.indexOf(instrumentIndex) != -1))) {
 				const instrument: Instrument = channel.instruments[instrumentIndex];
@@ -5650,7 +5849,8 @@ export class Synth {
 					// look for an adjacent note at the end of the previous pattern.
 					let prevPattern: Pattern | null = (this.prevBar == null) ? null : song.getPattern(channelIndex, this.prevBar);
 					if (prevPattern != null) {
-						const lastNote: Note | null = (prevPattern.notes.length <= 0) ? null : prevPattern.notes[prevPattern.notes.length - 1];
+						const prevNotes: Note[] = prevPattern.getLayer(layer);
+						const lastNote: Note | null = (prevNotes.length <= 0) ? null : prevNotes[prevNotes.length - 1];
 						if (lastNote != null && lastNote.end == partsPerBar) {
 							const patternForcesContinueAtStart: boolean = note.continuesLastPattern && Synth.adjacentNotesHaveMatchingPitches(lastNote, note);
 							const chordOfCompatibleInstrument: Chord | null = this.adjacentPatternHasCompatibleInstrumentTransition(song, channel, pattern!, prevPattern, instrumentIndex, transition, chord, note, lastNote, patternForcesContinueAtStart);
@@ -5669,7 +5869,8 @@ export class Synth {
 					// adjacent note at the beginning of the next pattern.
 					let nextPattern: Pattern | null = (this.nextBar == null) ? null : song.getPattern(channelIndex, this.nextBar);
 					if (nextPattern != null) {
-						const firstNote: Note | null = (nextPattern.notes.length <= 0) ? null : nextPattern.notes[0];
+						const nextNotes: Note[] = nextPattern.getLayer(layer);
+						const firstNote: Note | null = (nextNotes.length <= 0) ? null : nextNotes[0];
 						if (firstNote != null && firstNote.start == 0) {
 							const nextPatternForcesContinueAtStart: boolean = firstNote.continuesLastPattern && Synth.adjacentNotesHaveMatchingPitches(note, firstNote);
 							const chordOfCompatibleInstrument: Chord | null = this.adjacentPatternHasCompatibleInstrumentTransition(song, channel, pattern!, nextPattern, instrumentIndex, transition, chord, note, firstNote, nextPatternForcesContinueAtStart);

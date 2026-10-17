@@ -4,7 +4,7 @@ import {Dictionary, Config} from "../synth/SynthConfig.js";
 import {Note, Pattern, Channel} from "../synth/synth.js";
 import {SongDocument} from "./SongDocument.js";
 import {ChangeGroup} from "./Change.js";
-import {ChangeTrackSelection, ChangeChannelBar, ChangeDuplicateSelectedReusedPatterns, ChangeNoteAdded, ChangeNoteTruncate, ChangePatternNumbers, ChangePatternSelection, ChangeInsertBars, ChangeAddChannel, ChangeDeleteBars, ChangeRemoveChannel, ChangeEnsurePatternExists, ChangeNoteLength, ChangePaste, ChangeSetPatternInstruments, ChangeViewInstrument, ChangePatternsPerChannel, ChangePatternRhythm, ChangePatternScale, ChangeTranspose, ChangeChannelOrder, comparePatternNotes, unionOfUsedNotes, generateScaleMap, discardInvalidPatternInstruments, patternsContainSameInstruments} from "./changes.js";
+import {patternNotesInOrder, ChangeTrackSelection, ChangeChannelBar,ChangeDuplicateSelectedReusedPatterns, ChangeNoteAdded, ChangeNoteTruncate, ChangePatternNumbers, ChangePatternSelection, ChangeInsertBars, ChangeAddChannel, ChangeDeleteBars, ChangeRemoveChannel, ChangeEnsurePatternExists, ChangeNoteLength, ChangePaste, ChangeSetPatternInstruments, ChangeViewInstrument, ChangePatternsPerChannel, ChangePatternRhythm, ChangePatternScale, ChangeTranspose, ChangeChannelOrder, comparePatternNotes, unionOfUsedNotes, generateScaleMap, discardInvalidPatternInstruments, patternsContainSameInstruments} from "./changes.js";
 
 interface PatternCopy {
 	instruments: number[];
@@ -270,7 +270,7 @@ export class Selection {
 						instruments = pattern.instruments.concat();
 						
 						if (this.patternSelectionActive) {
-							for (const note of pattern.cloneNotes()) {
+							for (const note of patternNotesInOrder(pattern).map(note => note.clone())) {
 								if (note.end <= this.patternSelectionStart) continue;
 								if (note.start >= this.patternSelectionEnd) continue;
 								note.start -= this.patternSelectionStart;
@@ -281,7 +281,7 @@ export class Selection {
 								notes.push(note);
 							}
 						} else {
-							notes = pattern.notes;
+							notes = patternNotesInOrder(pattern);
 						}
 					}
 					patterns[String(patternNumber)] = {"instruments": instruments, "notes": notes};
@@ -344,7 +344,7 @@ export class Selection {
 					const existingPattern: Pattern | undefined = this._doc.song.channels[channelIndex].patterns[copiedPatternIndex - 1];
 					if (existingPattern != undefined &&
 						!this.patternSelectionActive &&
-						((comparePatternNotes(patternCopy["notes"], existingPattern.notes) && patternsContainSameInstruments(instrumentsCopy, existingPattern.instruments)) ||
+						((comparePatternNotes(patternCopy["notes"], patternNotesInOrder(existingPattern)) && patternsContainSameInstruments(instrumentsCopy, existingPattern.instruments)) ||
 						this._patternIndexIsUnused(channelIndex, copiedPatternIndex)))
 					{
 						group.append(new ChangePatternNumbers(this._doc, copiedPatternIndex, bar, channelIndex, 1, 1));
@@ -396,6 +396,7 @@ export class Selection {
 							for (const note of pattern.cloneNotes()) {
 								group.append(new ChangeNoteAdded(this._doc, newPattern, note, newPattern.notes.length, false));
 							}
+							newPattern.layers = pattern.cloneLayers();
 							// Don't overwrite the existing pattern's instruments if only part of the pattern content is being replaced.
 							//group.append(new ChangeSetPatternInstruments(this._doc, channelIndex, pattern.instruments, newPattern));
 						}
@@ -438,7 +439,7 @@ export class Selection {
 					
 					if (existingPattern != undefined &&
 						copiedPartDuration == Config.partsPerBeat * this._doc.song.beatsPerBar &&
-						comparePatternNotes(patternCopy["notes"], existingPattern.notes) &&
+						comparePatternNotes(patternCopy["notes"], patternNotesInOrder(existingPattern)) &&
 						patternsContainSameInstruments(instrumentsCopy, existingPattern.instruments))
 					{
 						group.append(new ChangePatternNumbers(this._doc, copiedPatternIndex, bar, channelIndex, 1, 1));
@@ -472,6 +473,7 @@ export class Selection {
 				// When a pattern becomes unused when replaced by rectangular selection pasting,
 				// remove all the notes from the pattern so that it may be reused.
 				this._doc.song.channels[channelIndex].patterns[removedPattern - 1].notes.length = 0;
+				this._doc.song.channels[channelIndex].patterns[removedPattern - 1].layers.length = 0;
 			}
 		}
 	}

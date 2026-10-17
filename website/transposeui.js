@@ -81,7 +81,7 @@ var TransposeUI = (function () {
 			if (song.getChannelIsNoise(i)) continue;
 			var channel = song.channels[i];
 			var noteCount = 0;
-			for (var p = 0; p < channel.patterns.length; p++) noteCount += channel.patterns[p].notes.length;
+			for (var p = 0; p < channel.patterns.length; p++) noteCount += channel.patterns[p].allNotes().length;
 
 			var row = el("div", "row");
 

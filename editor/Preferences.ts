@@ -10,6 +10,7 @@ export class Preferences {
 	public enableNotePreview: boolean;
 	public showFifth: boolean;
 	public notesOutsideScale: boolean;
+	public allowOverlappingNotes: boolean;
 	public defaultScale: number;
 	public showLetters: boolean;
 	public showStaff: boolean;
@@ -45,6 +46,8 @@ export class Preferences {
 		// On by default: a scale should guide writing, not lock out the other
 		// seven notes. Band music is full of chromatic passing tones.
 		this.notesOutsideScale = this._loadBoolean("notesOutsideScale", true);
+		// Off by default: overlapping notes need a new song format that upstream BeepBox cannot read.
+		this.allowOverlappingNotes = this._loadBoolean("allowOverlappingNotes", false);
 		// On by default: the note names down the left edge are how you read the
 		// concert scale you are writing in.
 		this.showLetters = this._loadBoolean("showLetters", true);
@@ -90,6 +93,7 @@ export class Preferences {
 		window.localStorage.setItem("enableNotePreview", this.enableNotePreview ? "true" : "false");
 		window.localStorage.setItem("showFifth", this.showFifth ? "true" : "false");
 		window.localStorage.setItem("notesOutsideScale", this.notesOutsideScale ? "true" : "false");
+		window.localStorage.setItem("allowOverlappingNotes", this.allowOverlappingNotes ? "true" : "false");
 		window.localStorage.setItem("defaultScale", Config.scales[this.defaultScale].name);
 		window.localStorage.setItem("showLetters", this.showLetters ? "true" : "false");
 		window.localStorage.setItem("transposingPart", String(this.transposingPart));

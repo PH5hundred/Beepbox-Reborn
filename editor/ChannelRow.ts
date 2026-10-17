@@ -65,7 +65,7 @@ export class ChannelRow {
 		for (let i: number = 0; i < this._boxes.length; i++) {
 			const pattern: Pattern | null = this._doc.song.getPattern(this.index, i);
 			const selected: boolean = (i == this._doc.bar && this.index == this._doc.channel);
-			const dim: boolean = (pattern == null || pattern.notes.length == 0);
+			const dim: boolean = (pattern == null || (pattern.notes.length == 0 && !pattern.hasLayers()));
 			
 			const box: Box = this._boxes[i];
 			if (i < this._doc.song.barCount) {

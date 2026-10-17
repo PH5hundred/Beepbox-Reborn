@@ -96,6 +96,15 @@ var SheetMusic = (function () {
 		return out;
 	}
 
+	function channelHasOverlaps(song, channelIndex) {
+		var channel = song.channels[channelIndex];
+		for (var bar = 0; bar < song.barCount; bar++) {
+			var pattern = channel.bars[bar] ? channel.patterns[channel.bars[bar] - 1] : null;
+			if (pattern && pattern.hasLayers && pattern.hasLayers()) return true;
+		}
+		return false;
+	}
+
 	// Pitches sounding at the same instant are one chord and share a stem. Drawn
 	// separately they each grow their own stem through the others' noteheads,
 	// which is most of what looks like overlap.
@@ -320,6 +329,15 @@ var SheetMusic = (function () {
 				" (sounds " + KEY_NAMES[song.key] + ")" : " &middot; " + KEY_NAMES[song.key]) +
 			"</span>";
 		container.appendChild(title);
+
+		if (channelHasOverlaps(song, channelIndex)) {
+			// Only layer 0 is notated; a second voice (stems up/down) is not drawn yet.
+			var overlapNotice = document.createElement("div");
+			overlapNotice.className = "overlap-notice";
+			overlapNotice.style.cssText = "font-style: italic; opacity: 0.75; margin: 2px 0 6px;";
+			overlapNotice.textContent = "Some overlapping notes in this channel aren't printed. Only the bottom layer is shown.";
+			container.appendChild(overlapNotice);
+		}
 
 		if (notes.length === 0) {
 			var empty = document.createElement("div");

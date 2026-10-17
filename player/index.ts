@@ -452,9 +452,10 @@ function renderTimeline(): void {
 			if (pattern == null) continue;
 			const offsetX: number = bar * barWidth;
 			
-			for (let i: number = 0; i < pattern.notes.length; i++) {
-				const note: Note = pattern.notes[i];
-				
+			const notes: Note[] = pattern.allNotes();
+			for (let i: number = 0; i < notes.length; i++) {
+				const note: Note = notes[i];
+
 				for (const pitch of note.pitches) {
 					const d: string = drawNote(pitch, note.start, note.pins, (pitchHeight + 1) / 2, offsetX, offsetY, partWidth, pitchHeight);
 					const noteElement: SVGPathElement = path({d: d, fill: ColorConfig.getChannelColor(synth.song, channel).primaryChannel});

@@ -8,7 +8,7 @@ import {SongDocument} from "./SongDocument.js";
 import {HTML, SVG} from "imperative-html/dist/esm/elements-strict.js";
 import {EasyPointers, Point2d} from "./EasyPointers.js";
 import {ChangeSequence, UndoableChange} from "./Change.js";
-import {ChangeChannelBar, ChangeDragSelectedNotes, ChangeEnsurePatternExists, ChangeNoteTruncate, ChangeNoteAdded, ChangePatternSelection, ChangePinTime, ChangeSizeBend, ChangePitchBend, ChangePitchAdded} from "./changes.js";
+import {ChangeChannelBar, ChangeDragSelectedNotes, ChangeEnsurePatternExists, ChangeNoteTruncate, ChangeNoteAdded, ChangePatternSelection, ChangePinTime, ChangeSizeBend, ChangePitchBend, ChangePitchAdded, ChangeRelayerPattern, layerPattern, patternNotesInOrder} from "./changes.js";
 
 function makeEmptyReplacementElement<T extends Node>(node: T): T {
 	const clone: T = <T> node.cloneNode(false);
@@ -26,6 +26,8 @@ class PatternCursor {
 	public pitchIndex:   number = -1;
 	public abovePitchIndex: number = 0;
 	public curIndex:     number = 0;
+	public curLayer:     number = 0; // Which overlap layer curNote, prevNote, nextNote and curIndex refer to.
+	public coverNote:    Note | null = null; // With overlaps allowed: the top note under the cursor at another pitch.
 	public start:        number = 0;
 	public end:          number = 0;
 	public part:         number = 0;
@@ -214,20 +216,41 @@ export class PatternEditor {
 			/ minDivision) * minDivision;
 		
 		if (this._pattern != null) {
-			const cursorPartForMatching: Number = Math.max(0, Math.min(partsPerPattern - 1, this._cursor.exactPart));
-			for (const note of this._pattern.notes) {
-				if (note.end <= cursorPartForMatching) {
-					this._cursor.prevNote = note;
-					this._cursor.curIndex++;
-				} else if (note.start <= cursorPartForMatching && note.end > cursorPartForMatching) {
-					this._cursor.curNote = note;
-				} else if (note.start > cursorPartForMatching) {
-					this._cursor.nextNote = note;
-					break;
+			const cursorPartForMatching: number = Math.max(0, Math.min(partsPerPattern - 1, this._cursor.exactPart));
+			const layered: boolean = this._pattern.layers.length > 0 || this._doc.prefs.allowOverlappingNotes;
+			const layer: number = layered ? this._pickCursorLayer(cursorPartForMatching) : 0;
+			if (layer >= 0) {
+				this._cursor.curLayer = layer;
+				for (const note of this._pattern.getLayer(layer)) {
+					if (note.end <= cursorPartForMatching) {
+						this._cursor.prevNote = note;
+						this._cursor.curIndex++;
+					} else if (note.start <= cursorPartForMatching && note.end > cursorPartForMatching) {
+						this._cursor.curNote = note;
+					} else if (note.start > cursorPartForMatching) {
+						this._cursor.nextNote = note;
+						break;
+					}
+				}
+			} else {
+				// Overlaps are allowed and no note sits at this pitch: a new note goes
+				// into layer 0 and relayering moves it wherever it fits.
+				this._cursor.curLayer = 0;
+				for (const note of this._pattern.notes) {
+					if (note.start <= cursorPartForMatching) this._cursor.curIndex++;
+				}
+			}
+			if (layered && this._cursor.curNote == null && this._cursor.coverNote == null) {
+				// Fit a clicked note into the gap between notes in every layer.
+				this._cursor.prevNote = null;
+				this._cursor.nextNote = null;
+				for (const note of this._pattern.allNotes()) {
+					if (note.end <= cursorPartForMatching && (this._cursor.prevNote == null || note.end > this._cursor.prevNote.end)) this._cursor.prevNote = note;
+					if (note.start > cursorPartForMatching && (this._cursor.nextNote == null || note.start < this._cursor.nextNote.start)) this._cursor.nextNote = note;
 				}
 			}
 		}
-		
+
 		let mousePitch: number = this._findMousePitch(this._mouseY);
 		
 		if (this._cursor.curNote != null) {
@@ -371,6 +394,48 @@ export class PatternEditor {
 		this._cursor.valid = true;
 	}
 	
+	// Picks the overlap layer the cursor acts on: the topmost note under the
+	// cursor at the cursor's pitch. Returns -1 when overlaps are allowed and the
+	// cursor is over other notes but not on one of their pitches, so dragging
+	// there draws a new note on top (coverNote is set for click-to-add-pitch).
+	private _pickCursorLayer(part: number): number {
+		const pattern: Pattern = this._pattern!;
+		const mousePitch: number = this._findMousePitch(this._mouseY);
+		let coverLayer: number = -1;
+		let coverNote: Note | null = null;
+		for (let layer: number = pattern.getLayerCount() - 1; layer >= 0; layer--) {
+			const note: Note | undefined = pattern.getLayer(layer).find(note => note.start <= part && note.end > part);
+			if (note == undefined) continue;
+			if (coverNote == null) {
+				coverLayer = layer;
+				coverNote = note;
+			}
+			const interval: number = PatternEditor._noteIntervalAt(note, part);
+			for (const pitch of note.pitches) {
+				if (Math.abs(mousePitch - (pitch + interval + 0.5)) < 1.0) return layer;
+			}
+		}
+		if (coverNote == null) return 0;
+		if (this._doc.prefs.allowOverlappingNotes) {
+			this._cursor.coverNote = coverNote;
+			return -1;
+		}
+		return coverLayer;
+	}
+
+	private static _noteIntervalAt(note: Note, part: number): number {
+		const time: number = part - note.start;
+		for (let i: number = 1; i < note.pins.length; i++) {
+			const prevPin: NotePin = note.pins[i - 1];
+			const nextPin: NotePin = note.pins[i];
+			if (time <= nextPin.time) {
+				const ratio: number = (nextPin.time > prevPin.time) ? (time - prevPin.time) / (nextPin.time - prevPin.time) : 0;
+				return prevPin.interval + (nextPin.interval - prevPin.interval) * Math.max(0, Math.min(1, ratio));
+			}
+		}
+		return note.pins[note.pins.length - 1].interval;
+	}
+
 	private _cursorIsInSelection(): boolean {
 		return this._cursor.valid && this._doc.selection.patternSelectionActive && this._doc.selection.patternSelectionStart <= this._cursor.exactPart && this._cursor.exactPart <= this._doc.selection.patternSelectionEnd;
 	}
@@ -529,7 +594,7 @@ export class PatternEditor {
 			}
 		} else if (this._cursorIsInSelection()) {
 			this._draggingSelectionContents = true;
-		} else if (this._cursor.valid && this._cursor.curNote == null && !this._pointers.latest.isTouch) {
+		} else if (this._cursor.valid && this._cursor.curNote == null && this._cursor.coverNote == null && !this._pointers.latest.isTouch) {
 			// If clicking in empty space, the result will be adding a note,
 			// so we can safely add it immediately. Note that if clicking on
 			// or near an existing note, the result will depend on whether
@@ -553,7 +618,8 @@ export class PatternEditor {
 		const pattern: Pattern | null = this._doc.getCurrentPattern(this._barOffset);
 		if (pattern == null) throw new Error();
 		sequence.append(new ChangeNoteAdded(this._doc, pattern, note, this._cursor.curIndex));
-		
+		this._relayerIfLayered(sequence, pattern);
+
 		if (this._doc.prefs.enableNotePreview && !this._doc.synth.playing) {
 			// Play the new note out loud if enabled.
 			const duration: number = Math.min(Config.partsPerBeat, this._cursor.end - this._cursor.start);
@@ -561,6 +627,17 @@ export class PatternEditor {
 		}
 	}
 	
+	private _relayerIfLayered(sequence: ChangeSequence, pattern: Pattern): void {
+		if (pattern.layers.length > 0 || this._doc.prefs.allowOverlappingNotes) {
+			sequence.append(new ChangeRelayerPattern(this._doc, pattern));
+		}
+	}
+
+	// The cursor note's own overlap layer, for changes that splice by index.
+	private _cursorLayerPattern(): Pattern {
+		return layerPattern(this._pattern!, this._cursor.curLayer);
+	}
+
 	private _onPointerMove = (event: PointerEvent): void => {
 		const point: Point2d = event.pointer!.getPointIn(this.container);
 		this._mouseX = point.x;
@@ -627,12 +704,13 @@ export class PatternEditor {
 						start = 0;
 						const pattern: Pattern | null = this._doc.getCurrentPattern(this._barOffset);
 						if (pattern != null) {
-							for (let i: number = 0; i < pattern.notes.length; i++) {
-								if (pattern.notes[i].start <= currentPart) {
-									start = pattern.notes[i].start;
+							const notes: Note[] = patternNotesInOrder(pattern);
+							for (let i: number = 0; i < notes.length; i++) {
+								if (notes[i].start <= currentPart) {
+									start = notes[i].start;
 								}
-								if (pattern.notes[i].end <= currentPart) {
-									start = pattern.notes[i].end;
+								if (notes[i].end <= currentPart) {
+									start = notes[i].end;
 								}
 							}
 						}
@@ -648,13 +726,14 @@ export class PatternEditor {
 						end = Config.partsPerBeat * this._doc.song.beatsPerBar;
 						const pattern: Pattern | null = this._doc.getCurrentPattern(this._barOffset);
 						if (pattern != null) {
-							for (let i: number = 0; i < pattern.notes.length; i++) {
-								if (pattern.notes[i].start >= currentPart) {
-									end = pattern.notes[i].start;
+							const notes: Note[] = patternNotesInOrder(pattern);
+							for (let i: number = 0; i < notes.length; i++) {
+								if (notes[i].start >= currentPart) {
+									end = notes[i].start;
 									break;
 								}
-								if (pattern.notes[i].end >= currentPart) {
-									end = pattern.notes[i].end;
+								if (notes[i].end >= currentPart) {
+									end = notes[i].end;
 									break;
 								}
 							}
@@ -746,15 +825,17 @@ export class PatternEditor {
 						sequence.append(new ChangeEnsurePatternExists(this._doc, this._doc.channel, this._doc.bar));
 						const pattern: Pattern | null = this._doc.getCurrentPattern(this._barOffset);
 						if (pattern == null) throw new Error();
-						sequence.append(new ChangeNoteTruncate(this._doc, pattern, start, end));
+						const overlap: boolean = this._doc.prefs.allowOverlappingNotes;
+						if (!overlap) sequence.append(new ChangeNoteTruncate(this._doc, pattern, start, end));
 						let i: number;
 						for (i = 0; i < pattern.notes.length; i++) {
-							if (pattern.notes[i].start >= end) break;
+							if (overlap ? pattern.notes[i].start > start : pattern.notes[i].start >= end) break;
 						}
 						const theNote: Note = new Note(this._cursor.pitch, start, end, Config.noteSizeMax, this._doc.song.getChannelIsNoise(this._doc.channel));
 						theNote.continuesLastPattern = continuesLastPattern;
 						sequence.append(new ChangeNoteAdded(this._doc, pattern, theNote, i));
 						this._copyPins(theNote);
+						this._relayerIfLayered(sequence, pattern);
 					
 						this._dragTime = backwards ? start : end;
 						this._dragPitch = this._cursor.pitch;
@@ -779,8 +860,9 @@ export class PatternEditor {
 					if (shiftedTime <= this._cursor.curNote.start && this._cursor.nearPinIndex == this._cursor.curNote.pins.length - 1 ||
 						shiftedTime >= this._cursor.curNote.end   && this._cursor.nearPinIndex == 0)
 					{
-						sequence.append(new ChangeNoteAdded(this._doc, this._pattern, this._cursor.curNote, this._cursor.curIndex, true));
-						
+						sequence.append(new ChangeNoteAdded(this._doc, this._cursorLayerPattern(), this._cursor.curNote, this._cursor.curIndex, true));
+						this._relayerIfLayered(sequence, this._pattern);
+
 						this._dragVisible = false;
 					} else {
 						const start: number = Math.min(this._cursor.curNote.start, shiftedTime);
@@ -791,9 +873,18 @@ export class PatternEditor {
 						this._dragSize = this._cursor.curNote.pins[this._cursor.nearPinIndex].size;
 						this._dragVisible = true;
 						
-						sequence.append(new ChangeNoteTruncate(this._doc, this._pattern, start, end, this._cursor.curNote));
+						if (this._doc.prefs.allowOverlappingNotes) {
+							// Overlaps allowed: nothing is cut.
+						} else if (this._pattern.layers.length == 0) {
+							sequence.append(new ChangeNoteTruncate(this._doc, this._pattern, start, end, this._cursor.curNote));
+						} else {
+							// Existing overlaps stay; only the newly covered time is cleared.
+							if (shiftedTime > this._cursor.curNote.end) sequence.append(new ChangeNoteTruncate(this._doc, this._pattern, this._cursor.curNote.end, shiftedTime, this._cursor.curNote));
+							if (shiftedTime < this._cursor.curNote.start) sequence.append(new ChangeNoteTruncate(this._doc, this._pattern, shiftedTime, this._cursor.curNote.start, this._cursor.curNote));
+						}
 						sequence.append(new ChangePinTime(this._doc, this._cursor.curNote, this._cursor.nearPinIndex, shiftedTime, continuesLastPattern));
 						this._copyPins(this._cursor.curNote);
+						this._relayerIfLayered(sequence, this._pattern);
 					}
 				} else if (this._cursor.pitchIndex == -1) {
 					sequence.append(new ChangePatternSelection(this._doc, 0, 0));
@@ -847,11 +938,15 @@ export class PatternEditor {
 					}
 					if (bendEnd < 0) bendEnd = 0;
 					if (bendEnd > this._doc.song.beatsPerBar * Config.partsPerBeat) bendEnd = this._doc.song.beatsPerBar * Config.partsPerBeat;
-					if (bendEnd > this._cursor.curNote.end) {
-						sequence.append(new ChangeNoteTruncate(this._doc, this._pattern, this._cursor.curNote.start, bendEnd, this._cursor.curNote));
-					}
-					if (bendEnd < this._cursor.curNote.start) {
-						sequence.append(new ChangeNoteTruncate(this._doc, this._pattern, bendEnd, this._cursor.curNote.end, this._cursor.curNote));
+					if (!this._doc.prefs.allowOverlappingNotes) {
+						// With existing overlaps, only the newly covered time is cleared.
+						const layered: boolean = this._pattern.layers.length > 0;
+						if (bendEnd > this._cursor.curNote.end) {
+							sequence.append(new ChangeNoteTruncate(this._doc, this._pattern, layered ? this._cursor.curNote.end : this._cursor.curNote.start, bendEnd, this._cursor.curNote));
+						}
+						if (bendEnd < this._cursor.curNote.start) {
+							sequence.append(new ChangeNoteTruncate(this._doc, this._pattern, bendEnd, layered ? this._cursor.curNote.start : this._cursor.curNote.end, this._cursor.curNote));
+						}
 					}
 					
 					let minPitch: number = Number.MAX_VALUE;
@@ -865,6 +960,7 @@ export class PatternEditor {
 					const bendTo: number = this._snapToPitch(this._findMousePitch(this._mouseY), -minPitch, this._getMaxPitch() - maxPitch);
 					sequence.append(new ChangePitchBend(this._doc, this._cursor.curNote, bendStart, bendEnd, bendTo, this._cursor.pitchIndex));
 					this._copyPins(this._cursor.curNote);
+					this._relayerIfLayered(sequence, this._pattern);
 					
 					this._dragTime = bendEnd;
 					this._dragPitch = bendTo;
@@ -896,6 +992,18 @@ export class PatternEditor {
 			} else if (this._mouseDragging || !this._dragChange.isNoop()) {
 				this._doc.record(this._dragChange);
 				this._dragChange = null;
+			} else if (this._cursor.curNote == null && this._cursor.coverNote != null) {
+				// Overlaps allowed and clicked over a note at an empty pitch: a click
+				// still adds the pitch to that note's chord; only a drag draws a new note.
+				const coverNote: Note = this._cursor.coverNote;
+				const sequence: ChangeSequence = new ChangeSequence();
+				sequence.append(new ChangePatternSelection(this._doc, 0, 0));
+				if (coverNote.pitches.length == Config.maxChordSize) {
+					sequence.append(new ChangePitchAdded(this._doc, coverNote, coverNote.pitches[0], 0, true));
+				}
+				sequence.append(new ChangePitchAdded(this._doc, coverNote, this._cursor.pitch, coverNote.pitches.length));
+				this._copyPins(coverNote);
+				this._doc.record(sequence);
 			} else if (this._cursor.curNote == null) {
 				if (this._pointers.latest.isTouch) {
 					// If in touch mode, we can't add a new note on press because the
@@ -923,7 +1031,8 @@ export class PatternEditor {
 					}
 				} else {
 					if (this._cursor.curNote.pitches.length == 1) {
-						sequence.append(new ChangeNoteAdded(this._doc, this._pattern, this._cursor.curNote, this._cursor.curIndex, true));
+						sequence.append(new ChangeNoteAdded(this._doc, this._cursorLayerPattern(), this._cursor.curNote, this._cursor.curIndex, true));
+						this._relayerIfLayered(sequence, this._pattern);
 					} else {
 						sequence.append(new ChangePitchAdded(this._doc, this._cursor.curNote, this._cursor.pitch, this._cursor.curNote.pitches.indexOf(this._cursor.pitch), true));
 					}
@@ -1138,7 +1247,7 @@ export class PatternEditor {
 				if (pattern2 == null) continue;
 				
 				const octaveOffset: number = this._doc.getBaseVisibleOctave(channel) * Config.pitchesPerOctave;
-				for (const note of pattern2.notes) {
+				for (const note of pattern2.allNotes()) {
 					for (const pitch of note.pitches) {
 						const notePath: SVGPathElement = SVG.path();
 						notePath.setAttribute("fill", ColorConfig.getChannelColor(this._doc.song, channel).secondaryNote);
@@ -1155,12 +1264,19 @@ export class PatternEditor {
 			const chord: Chord = instrument.getChord();
 			const transition: Transition = instrument.getTransition();
 			const displayNumberedChords: boolean = chord.customInterval || chord.arpeggiates || chord.strumParts > 0 || transition.slides;
-			for (const note of this._pattern.notes) {
+			// Higher overlap layers are drawn later so they sit on top, outlined so
+			// stacked notes can be told apart.
+			for (let layer: number = 0; layer < this._pattern.getLayerCount(); layer++) for (const note of this._pattern.getLayer(layer)) {
 				for (let i: number = 0; i < note.pitches.length; i++) {
 					const pitch: number = note.pitches[i];
 					let notePath: SVGPathElement = SVG.path();
 					notePath.setAttribute("fill", ColorConfig.getChannelColor(this._doc.song, this._doc.channel).secondaryNote);
 					notePath.setAttribute("pointer-events", "none");
+					if (layer > 0) {
+						notePath.setAttribute("stroke", ColorConfig.editorBackground);
+						notePath.setAttribute("stroke-width", "1.5");
+						notePath.setAttribute("class", "overlapNote");
+					}
 					this._drawNote(notePath, pitch, note.start, note.pins, this._pitchHeight / 2 + 1, false, this._octaveOffset);
 					this._svgNoteContainer.appendChild(notePath);
 					notePath = SVG.path();

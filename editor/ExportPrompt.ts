@@ -9,6 +9,7 @@ import {Prompt} from "./Prompt.js";
 import {HTML} from "imperative-html/dist/esm/elements-strict.js";
 import {SongRenderer} from "./SongRenderer.js";
 import {ArrayBufferWriter} from "./ArrayBufferWriter.js";
+import {patternNotesInOrder} from "./changes.js";
 import {MidiChunkType, MidiFileFormat, MidiControlEventMessage, MidiEventType, MidiMetaEventMessage, MidiRegisteredParameterNumberMSB, MidiRegisteredParameterNumberLSB, volumeMultToMidiVolume, volumeMultToMidiExpression, defaultMidiPitchBend, defaultMidiExpression} from "./Midi.js";
 
 const {button, div, h2, input, progress, select, option} = HTML;
@@ -582,9 +583,27 @@ export class ExportPrompt implements Prompt {
 							}
 						}
 						
-						for (let noteIndex: number = 0; noteIndex < pattern.notes.length; noteIndex++) {
-							const note: Note = pattern.notes[noteIndex];
-							
+						// Overlapping notes would write events out of time order, so their
+						// events are collected first and sorted before writing.
+						const layered: boolean = pattern.hasLayers();
+						const notesToExport: Note[] = layered ? patternNotesInOrder(pattern) : pattern.notes;
+						const collected: {time: number, bytes: number[], order: number}[] = [];
+						let collecting: number[] = [];
+						const noteOut = layered ? {
+							eventTime: (time: number): void => { collecting = []; collected.push({time: time, bytes: collecting, order: collected.length}); },
+							writeUint8: (value: number): void => { collecting.push(value & 0xff); },
+							writeMidi7Bits: (value: number): void => { if ((value >>> 0) >= 0x80) throw new Error("7 bit value contained 8th bit!"); collecting.push(value >>> 0); },
+							controlEvent: (message: MidiControlEventMessage, value: number): void => { if (!(value >= 0 && value <= 0x7F)) throw new Error("Midi control event value out of range: " + value); collecting.push(MidiEventType.controlChange | midiChannel, message, value | 0); },
+						} : {
+							eventTime: writeEventTime,
+							writeUint8: (value: number): void => writer.writeUint8(value),
+							writeMidi7Bits: (value: number): void => writer.writeMidi7Bits(value),
+							controlEvent: writeControlEvent,
+						};
+
+						for (let noteIndex: number = 0; noteIndex < notesToExport.length; noteIndex++) {
+							const note: Note = notesToExport[noteIndex];
+
 							const noteStartTime: number = barStartTime + note.start * midiTicksPerPart;
 							let pinTime: number = noteStartTime;
 							let pinSize: number = note.pins[0].size;
@@ -642,16 +661,16 @@ export class ExportPrompt implements Prompt {
 									const expression: number = Math.min(0x7f, Math.round(volumeMultToMidiExpression(Synth.noteSizeToVolumeMult(linearSize))));
 									
 									if (pitchBend != prevPitchBend) {
-										writeEventTime(midiTickTime);
-										writer.writeUint8(MidiEventType.pitchBend | midiChannel);
-										writer.writeMidi7Bits(pitchBend & 0x7f); // least significant bits
-										writer.writeMidi7Bits((pitchBend >> 7) & 0x7f); // most significant bits
+										noteOut.eventTime(midiTickTime);
+										noteOut.writeUint8(MidiEventType.pitchBend | midiChannel);
+										noteOut.writeMidi7Bits(pitchBend & 0x7f); // least significant bits
+										noteOut.writeMidi7Bits((pitchBend >> 7) & 0x7f); // most significant bits
 										prevPitchBend = pitchBend;
 									}
 									
 									if (expression != prevExpression && !isDrumset) {
-										writeEventTime(midiTickTime);
-										writeControlEvent(MidiControlEventMessage.expressionMSB, expression);
+										noteOut.eventTime(midiTickTime);
+										noteOut.controlEvent(MidiControlEventMessage.expressionMSB, expression);
 										prevExpression = expression;
 									}
 									
@@ -696,19 +715,19 @@ export class ExportPrompt implements Prompt {
 										nextPitches[toneIndex] = nextPitch;
 										
 										if (!noteStarting && prevPitches[toneIndex] != nextPitches[toneIndex]) {
-											writeEventTime(midiTickTime);
-											writer.writeUint8(MidiEventType.noteOff | midiChannel);
-											writer.writeMidi7Bits(prevPitches[toneIndex]); // old pitch
-											writer.writeMidi7Bits(velocity); // velocity
+											noteOut.eventTime(midiTickTime);
+											noteOut.writeUint8(MidiEventType.noteOff | midiChannel);
+											noteOut.writeMidi7Bits(prevPitches[toneIndex]); // old pitch
+											noteOut.writeMidi7Bits(velocity); // velocity
 										}
 									}
 									
 									for (let toneIndex: number = 0; toneIndex < toneCount; toneIndex++) {
 										if (noteStarting || prevPitches[toneIndex] != nextPitches[toneIndex]) {
-											writeEventTime(midiTickTime);
-											writer.writeUint8(MidiEventType.noteOn | midiChannel);
-											writer.writeMidi7Bits(nextPitches[toneIndex]); // new pitch
-											writer.writeMidi7Bits(velocity); // velocity
+											noteOut.eventTime(midiTickTime);
+											noteOut.writeUint8(MidiEventType.noteOn | midiChannel);
+											noteOut.writeMidi7Bits(nextPitches[toneIndex]); // new pitch
+											noteOut.writeMidi7Bits(velocity); // velocity
 											prevPitches[toneIndex] = nextPitches[toneIndex];
 										}
 									}
@@ -726,13 +745,23 @@ export class ExportPrompt implements Prompt {
 								// TODO: If the note at the start of the next pattern has
 								// continuesLastPattern and has the same chord, it ought to extend
 								// this previous note.
-								writeEventTime(noteEndTime);
-								writer.writeUint8(MidiEventType.noteOff | midiChannel);
-								writer.writeMidi7Bits(prevPitches[toneIndex]); // pitch
-								writer.writeMidi7Bits(velocity); // velocity
+								noteOut.eventTime(noteEndTime);
+								noteOut.writeUint8(MidiEventType.noteOff | midiChannel);
+								noteOut.writeMidi7Bits(prevPitches[toneIndex]); // pitch
+								noteOut.writeMidi7Bits(velocity); // velocity
 							}
-							
+
 							shouldResetExpressionAndPitchBend = true;
+						}
+
+						if (layered) {
+							// At the same instant, note-offs go first so a repeated pitch ends before it restarts.
+							const isNoteOff = (bytes: number[]): number => ((bytes[0] & 0xf0) == MidiEventType.noteOff) ? 1 : 0;
+							collected.sort((a, b) => a.time - b.time || isNoteOff(b.bytes) - isNoteOff(a.bytes) || a.order - b.order);
+							for (const event of collected) {
+								writeEventTime(event.time);
+								for (const byte of event.bytes) writer.writeUint8(byte);
+							}
 						}
 					} else {
 						if (shouldResetExpressionAndPitchBend) {
