@@ -18,5 +18,8 @@
 # node_modules lives behind a .nosync symlink so iCloud never syncs it.
 /node_modules.nosync
 
+# Generated from samples/manifest.json by scripts/bake-samples.cjs on every build.
+/editor/BakedSamples.ts
+
 # website/beepbox_offline.html is intentionally committed: it is the single-file
 # build people download and open directly, with no server or install.

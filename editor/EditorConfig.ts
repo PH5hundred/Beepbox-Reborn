@@ -1,7 +1,7 @@
 // Copyright (c) John Nesky and contributing authors, distributed under the MIT license, see accompanying the LICENSE.md file.
 
 import {DictionaryArray, BeepBoxOption, InstrumentType, toNameMap} from "../synth/SynthConfig.js";
-import {SampleRegistry, SampleCategory} from "../synth/SampleRegistry.js";
+import {SampleRegistry, SampleSet} from "../synth/SampleRegistry.js";
 
 export interface PresetCategory extends BeepBoxOption {
 	readonly presets: DictionaryArray<Preset>;
@@ -320,25 +320,62 @@ export class EditorConfig {
 			{name: "soft square pad",     midiProgram:  89, settings: {"type":"chip","eqFilter":[{"type":"low-pass","cutoffHz":3363.59,"linearGain":1.4142}],"effects":["reverb","chorus"],"transition":"normal","fadeInSeconds":0.0938,"fadeOutTicks":48,"chord":"simultaneous","wave":"rounded","unison":"hum","envelopes":[],"reverb":67,"chorus":50}},
 			{name: "blip arp",            midiProgram:  80, settings: {"type":"PWM","eqFilter":[{"type":"low-pass","cutoffHz":8000,"linearGain":1}],"effects":["chord type"],"transition":"normal","fadeInSeconds":0.0,"fadeOutTicks":6,"chord":"arpeggio","pulseWidth":25,"envelopes":[]}},
 		])},
-		// Filled at runtime from SampleRegistry by refreshSamplePresets(); empty until something registers audio.
-		{name: "Imported", presets: <DictionaryArray<Preset>> toNameMap([])},
+		// Filled at runtime from SampleRegistry by refreshSamplePresets(); empty until a recording is baked in.
 		{name: "Sampled Instruments", presets: <DictionaryArray<Preset>> toNameMap([])},
+		// Each imported SoundFont gets categories of its own, appended after this
+		// point at runtime, so built-in preset values never move.
 	]);
 
-	private static readonly _sampleCategoryNames: {readonly [category in SampleCategory]: string} = {"imported": "Imported", "sampled": "Sampled Instruments"};
+	private static readonly _staticCategoryCount: number = EditorConfig.presetCategories.length;
+	// A preset value stores its category in one base64 digit.
+	private static readonly _maxCategoryCount: number = 64;
+	private static readonly _maxPresetsPerCategory: number = 64;
+	private static _sampleSetPresetValues: Map<string, number> = new Map();
 
-	// Entries are indexed by registration order within their category, which is
-	// what keeps a preset's menu value stable while the page is open.
+	// Sampled recordings fill "Sampled Instruments". Imported sets are listed under
+	// their own group (one per SoundFont), split into "(1/2)", "(2/2)"... past 64
+	// presets. Entries follow registration order, which keeps a preset's menu value
+	// stable while the page is open.
 	public static refreshSamplePresets(): void {
-		for (const category of <SampleCategory[]> ["imported", "sampled"]) {
-			const presets: any = EditorConfig.presetCategories.dictionary[EditorConfig._sampleCategoryNames[category]].presets;
+		const categories: any = EditorConfig.presetCategories;
+		for (let i: number = categories.length - 1; i >= EditorConfig._staticCategoryCount; i--) delete categories.dictionary[categories[i].name];
+		categories.length = EditorConfig._staticCategoryCount;
+		EditorConfig._sampleSetPresetValues = new Map();
+
+		const makePresets = (category: PresetCategory, sets: ReadonlyArray<SampleSet>): void => {
+			const presets: any = category.presets;
 			presets.length = 0;
 			presets.dictionary = {};
-			for (const set of SampleRegistry.list()) {
-				if (set.category != category || presets.length >= 64) continue;
-				const preset: Preset = {index: presets.length, name: set.name, isNoise: set.isNoise, settings: {"type":"sample","eqFilter":[],"effects":["reverb"],"reverb":33,"transition":"normal","fadeInSeconds":0,"fadeOutTicks":24,"chord":"simultaneous","sampleSet":set.name,"envelopes":[]}};
+			for (const set of sets) {
+				const preset: Preset = {index: presets.length, name: set.label, isNoise: set.isNoise, settings: {"type":"sample","eqFilter":[],"effects":["reverb"],"reverb":33,"transition":"normal","fadeInSeconds":0,"fadeOutTicks":24,"chord":"simultaneous","sampleSet":set.name,"envelopes":[]}};
 				presets.push(preset);
-				presets.dictionary[set.name] = preset;
+				if (presets.dictionary[set.label] == undefined) presets.dictionary[set.label] = preset;
+				EditorConfig._sampleSetPresetValues.set(set.name, (category.index << 6) + preset.index);
+			}
+		};
+
+		const all: ReadonlyArray<SampleSet> = SampleRegistry.list();
+		makePresets(EditorConfig.presetCategories.dictionary["Sampled Instruments"], all.filter(set => set.category == "sampled").slice(0, EditorConfig._maxPresetsPerCategory));
+
+		const groups: Map<string, SampleSet[]> = new Map();
+		for (const set of all) {
+			if (set.category != "imported") continue;
+			if (!groups.has(set.group)) groups.set(set.group, []);
+			groups.get(set.group)!.push(set);
+		}
+		for (const [group, sets] of groups) {
+			const chunkCount: number = Math.ceil(sets.length / EditorConfig._maxPresetsPerCategory);
+			for (let chunk: number = 0; chunk < chunkCount; chunk++) {
+				let name: string = (chunkCount > 1) ? group + " (" + (chunk + 1) + "/" + chunkCount + ")" : group;
+				while (categories.dictionary[name] != undefined) name += " ";
+				if (categories.length >= EditorConfig._maxCategoryCount) {
+					console.warn("Too many imported instrument groups to list them all; \"" + name + "\" and later groups are left out of the menu.");
+					return;
+				}
+				const category: any = {name, index: categories.length, presets: toNameMap<Preset>([])};
+				categories.push(category);
+				categories.dictionary[name] = category;
+				makePresets(category, sets.slice(chunk * EditorConfig._maxPresetsPerCategory, (chunk + 1) * EditorConfig._maxPresetsPerCategory));
 			}
 		}
 	}
@@ -346,12 +383,7 @@ export class EditorConfig {
 	// The value a menu should show for a sample instrument: its set's own entry if
 	// one is registered here, otherwise the plain "sample" type.
 	public static presetValueForSampleSet(name: string): number {
-		for (const sampleCategory of <SampleCategory[]> ["imported", "sampled"]) {
-			const category: PresetCategory = EditorConfig.presetCategories.dictionary[EditorConfig._sampleCategoryNames[sampleCategory]];
-			const preset: Preset | undefined = category.presets.dictionary[name];
-			if (preset != undefined) return (category.index << 6) + preset.index;
-		}
-		return InstrumentType.sample;
+		return EditorConfig._sampleSetPresetValues.get(name) ?? InstrumentType.sample;
 	}
 
 	public static valueToPreset(presetValue: number): Preset | null {

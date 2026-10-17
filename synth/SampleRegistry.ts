@@ -21,15 +21,21 @@ export interface SampleSet {
 	readonly category: SampleCategory;
 	readonly isNoise: boolean; // shown in the drum channel's menu instead of the pitched one
 	readonly zones: ReadonlyArray<SampleZone>;
+	readonly group: string; // instrument-menu group it is listed under
+	readonly label: string; // its name in that menu; the set name stays the unique key songs store
 }
 
 export interface SampleSetOptions {
 	readonly category?: SampleCategory; // default "sampled"
 	readonly isNoise?: boolean; // default false
+	readonly group?: string; // default "Sampled Instruments" or "Imported", by category
+	readonly label?: string; // default the set name
 }
 
 const sets: SampleSet[] = [];
 const listeners: Array<() => void> = [];
+let batchDepth: number = 0;
+let changedDuringBatch: boolean = false;
 
 function validateZone(zone: SampleZone): void {
 	if (!(zone.data instanceof Float32Array) || zone.data.length == 0) throw new Error("Sample zone has no audio data.");
@@ -45,7 +51,9 @@ export class SampleRegistry {
 		if (name == "") throw new Error("A sample set needs a name.");
 		if (zones.length == 0) throw new Error("A sample set needs at least one zone.");
 		for (const zone of zones) validateZone(zone);
-		const set: SampleSet = {name, category: options.category ?? "sampled", isNoise: options.isNoise ?? false, zones: zones.slice()};
+		const category: SampleCategory = options.category ?? "sampled";
+		const group: string = options.group ?? (category == "sampled" ? "Sampled Instruments" : "Imported");
+		const set: SampleSet = {name, category, isNoise: options.isNoise ?? false, zones: zones.slice(), group, label: options.label ?? name};
 		const index: number = sets.findIndex(existing => existing.name == name);
 		if (index == -1) sets.push(set); else sets[index] = set;
 		SampleRegistry._notify();
@@ -68,6 +76,21 @@ export class SampleRegistry {
 		return sets.slice();
 	}
 
+	// Registers or removes many sets with a single change notification, so a
+	// SoundFont with hundreds of presets rebuilds the menus once, not per preset.
+	public static batch(callback: () => void): void {
+		batchDepth++;
+		try {
+			callback();
+		} finally {
+			batchDepth--;
+			if (batchDepth == 0 && changedDuringBatch) {
+				changedDuringBatch = false;
+				SampleRegistry._notify();
+			}
+		}
+	}
+
 	public static onChange(listener: () => void): void {
 		listeners.push(listener);
 	}
@@ -88,6 +111,10 @@ export class SampleRegistry {
 	}
 
 	private static _notify(): void {
+		if (batchDepth > 0) {
+			changedDuringBatch = true;
+			return;
+		}
 		for (const listener of listeners) listener();
 	}
 }

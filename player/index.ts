@@ -3,6 +3,7 @@
 import {Dictionary, DictionaryArray, EnvelopeType, InstrumentType, Transition, Chord, Envelope, Config} from "../synth/SynthConfig.js";
 import {ColorConfig} from "../editor/ColorConfig.js";
 import {NotePin, Note, Pattern, Instrument, Channel, Synth} from "../synth/synth.js";
+import "../editor/BakedSamples.js"; // Registers the recordings baked into this build, if any.
 import {HTML, SVG} from "imperative-html/dist/esm/elements-strict.js";
 
 const {a, button, div, h1, input} = HTML;

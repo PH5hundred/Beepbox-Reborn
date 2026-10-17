@@ -16,6 +16,8 @@ done
 # is faster. However, this doesn't check type safety at all! Also, the generated
 # JS output has some slight differences, so check the other build strategies
 # before publishing updates.
+node scripts/bake-samples.cjs
+
 npx concurrently \
 	"npx esbuild --format=iife --keep-names --global-name=beepbox --bundle ./editor/index.js --outfile=website/beepbox_editor.js --sourcemap --watch" \
 	"npx five-server --wait=200 --watch=website/* --port=8081 --open=$open_browser_path website/"

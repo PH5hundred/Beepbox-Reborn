@@ -1,6 +1,9 @@
 #!/bin/bash
 set -e
 
+# Generate editor/BakedSamples.ts from samples/manifest.json
+node scripts/bake-samples.cjs
+
 # Compile player/index.ts into build/player/index.js and dependencies
 npx tsc -p scripts/tsconfig_player.json
 

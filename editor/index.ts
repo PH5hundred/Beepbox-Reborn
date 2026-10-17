@@ -4,6 +4,7 @@ export {Dictionary, DictionaryArray, EnvelopeType, InstrumentType, Transition, C
 export {EditorConfig} from "./EditorConfig.js";
 export {ColorConfig} from "./ColorConfig.js";
 import "./style.js"; // Import for the side effects, there's no exports.
+import "./BakedSamples.js"; // Registers the recordings baked into this build, if any.
 export {SongEditor} from "./SongEditor.js";
 export {NotePin, Note, Pattern, Instrument, Channel, Song, Synth, SampleRegistry} from "../synth/synth.js";
 export {SongDocument} from "./SongDocument.js";

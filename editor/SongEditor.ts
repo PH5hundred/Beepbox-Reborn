@@ -36,6 +36,8 @@ import {SustainPrompt} from "./SustainPrompt.js";
 import {ChannelSettingsPrompt} from "./ChannelSettingsPrompt.js";
 import {ExportPrompt} from "./ExportPrompt.js";
 import {ImportPrompt} from "./ImportPrompt.js";
+import {SoundFontPrompt} from "./SoundFontPrompt.js";
+import {SoundFontLibrary} from "./SoundFontLibrary.js";
 import {SongRecoveryPrompt} from "./SongRecoveryPrompt.js";
 import {RecordingSetupPrompt} from "./RecordingSetupPrompt.js";
 import {Change} from "./Change.js";
@@ -222,6 +224,7 @@ export class SongEditor {
 		option({selected: true, disabled: true, hidden: hideSelectMenuTitlesInOptions}, "File"),
 		option({value: "new"}, "+ New Blank Song"),
 		option({value: "import"}, "↑ Import Song... (" + ctrlSymbol + "O)"),
+		option({value: "soundFonts"}, "↑ Import SoundFont..."),
 		option({value: "export"}, "↓ Export Song... (" + ctrlSymbol + "S)"),
 		option({value: "copyUrl"}, "⎘ Copy Song URL"),
 		option({value: "shareUrl"}, "⤳ Share Song URL"),
@@ -698,6 +701,7 @@ export class SongEditor {
 		// Sets registered before the editor existed are picked up here; later ones via onChange.
 		this._refillPresetMenus();
 		SampleRegistry.onChange(this._whenSampleSetsChanged);
+		SoundFontLibrary.loadSaved();
 		this._algorithmSelect.addEventListener("change", this._whenSetAlgorithm);
 		this._instrumentsButtonBar.addEventListener("click", this._whenSelectInstrument);
 		this._instrumentCopyButton.addEventListener("click", this._copyInstrument);
@@ -850,6 +854,9 @@ export class SongEditor {
 					break;
 				case "import":
 					this.prompt = new ImportPrompt(this.doc);
+					break;
+				case "soundFonts":
+					this.prompt = new SoundFontPrompt(this.doc);
 					break;
 				case "songRecovery":
 					this.prompt = new SongRecoveryPrompt(this.doc);
@@ -2251,6 +2258,9 @@ export class SongEditor {
 				break;
 			case "import":
 				this._openPrompt("import");
+				break;
+			case "soundFonts":
+				this._openPrompt("soundFonts");
 				break;
 			case "copyUrl":
 				this._copyTextToClipboard(new URL("#" + this.doc.song.toBase64String(), location.href).href);

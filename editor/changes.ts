@@ -2395,7 +2395,8 @@ export function pickRandomPresetValue(isNoise: boolean): number {
 		if (category.name == "Novelty Presets") continue;
 		for (let presetIndex: number = 0; presetIndex < category.presets.length; presetIndex++) {
 			const preset: Preset = category.presets[presetIndex];
-			if (preset.settings != undefined && (preset.isNoise == true) == isNoise) {
+			// Sample presets are skipped: their audio may exist only on this computer.
+			if (preset.settings != undefined && preset.settings["type"] != "sample" && (preset.isNoise == true) == isNoise) {
 				eligiblePresetValues.push((categoryIndex << 6) + presetIndex);
 			}
 		}
