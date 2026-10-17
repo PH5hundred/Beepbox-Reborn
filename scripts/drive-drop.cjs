@@ -1,6 +1,7 @@
 #!/usr/bin/env node
-// Copies the freshly built offline editor into a Google Drive folder, so the
-// shared copy is never behind the build. Runs after every `npm run build`.
+// Copies the freshly built offline editor into a "BeepBox Reborn" folder in
+// iCloud Drive and in Google Drive, so neither copy is ever behind the build.
+// Runs after every `npm run build`.
 //
 // It does nothing unless that folder is actually there, the same way
 // nosync-deps.cjs does nothing outside iCloud Drive, so a clone on any other
@@ -41,6 +42,8 @@ function findDriveFolders() {
 		return [];
 	}
 	const found = [];
+	const iCloudFolder = path.join(os.homedir(), "Library", "Mobile Documents", "com~apple~CloudDocs", FOLDER_NAME);
+	if (reachable(iCloudFolder)) found.push(iCloudFolder);
 	for (const entry of entries) {
 		if (!entry.startsWith("GoogleDrive-")) continue;
 		for (const root of ["My Drive", "Shared drives"]) {
