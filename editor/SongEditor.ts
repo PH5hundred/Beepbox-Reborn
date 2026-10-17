@@ -4,7 +4,7 @@ import {InstrumentType, EffectType, Config, getPulseWidthRatio, effectsIncludeTr
 import {Preset, PresetCategory, EditorConfig, isMobile, isOnMac, ctrlSymbol, prettyNumber} from "./EditorConfig.js";
 import {ColorConfig, ChannelColors} from "./ColorConfig.js";
 import "./Layout.js"; // Imported here for the sake of ensuring this code is transpiled early.
-import {Instrument, Channel, Song, Synth} from "../synth/synth.js";
+import {Instrument, Channel, Song, Synth, SampleRegistry} from "../synth/synth.js";
 import {HTML} from "imperative-html/dist/esm/elements-strict.js";
 import {EasyPointers, getElementDimensions} from "./EasyPointers.js";
 import {Preferences} from "./Preferences.js";
@@ -39,7 +39,7 @@ import {ImportPrompt} from "./ImportPrompt.js";
 import {SongRecoveryPrompt} from "./SongRecoveryPrompt.js";
 import {RecordingSetupPrompt} from "./RecordingSetupPrompt.js";
 import {Change} from "./Change.js";
-import {ChangeTempo, ChangeChorus, ChangeEchoDelay, ChangeEchoSustain, ChangeVolume, ChangePan, ChangePatternSelection, ChangeSupersawDynamism, ChangeSupersawSpread, ChangeSupersawShape, ChangePulseWidth, ChangeFeedbackAmplitude, ChangeOperatorAmplitude, ChangeOperatorFrequency, ChangeDrumsetEnvelope, ChangePasteInstrument, ChangePreset, pickRandomPresetValue, ChangeRandomGeneratedInstrument, ChangeScale, ChangeDetectKey, ChangeKey, ChangeRhythm, ChangeFeedbackType, ChangeAlgorithm, ChangeCustomizeInstrument, ChangeChipWave, ChangeNoiseWave, ChangeTransition, ChangeToggleEffects, ChangeVibrato, ChangeUnison, ChangeChord, ChangeSong, ChangePitchShift, ChangeDetune, ChangeDistortion, ChangeStringSustain, ChangeBitcrusherFreq, ChangeBitcrusherQuantization, ChangeAddEnvelope, ChangeAddChannelInstrument, ChangeRemoveChannelInstrument, ChangeBarCount, ChangeDeleteBars, ChangeAddChannel, ChangeRemoveChannel, ChangeBeatUnit, ChangeBeatsPerBar, ChangeMasterVolume, ChangeMeasureVolume, ChangeReverbAndEnable} from "./changes.js";
+import {ChangeTempo, ChangeChorus, ChangeEchoDelay, ChangeEchoSustain, ChangeVolume, ChangePan, ChangePatternSelection, ChangeSupersawDynamism, ChangeSupersawSpread, ChangeSupersawShape, ChangePulseWidth, ChangeFeedbackAmplitude, ChangeOperatorAmplitude, ChangeOperatorFrequency, ChangeDrumsetEnvelope, ChangePasteInstrument, ChangePreset, pickRandomPresetValue, ChangeRandomGeneratedInstrument, ChangeScale, ChangeDetectKey, ChangeKey, ChangeRhythm, ChangeFeedbackType, ChangeAlgorithm, ChangeCustomizeInstrument, ChangeChipWave, ChangeNoiseWave, ChangeTransition, ChangeToggleEffects, ChangeVibrato, ChangeUnison, ChangeChord, ChangeSong, ChangePitchShift, ChangeDetune, ChangeDistortion, ChangeStringSustain, ChangeBitcrusherFreq, ChangeBitcrusherQuantization, ChangeAddEnvelope, ChangeAddChannelInstrument, ChangeRemoveChannelInstrument, ChangeBarCount, ChangeDeleteBars, ChangeAddChannel, ChangeRemoveChannel, ChangeBeatUnit, ChangeBeatsPerBar, ChangeMasterVolume, ChangeMeasureVolume, ChangeReverbAndEnable, ChangeSampleSet} from "./changes.js";
 
 const {a, button, div, input, select, span, optgroup, option} = HTML;
 
@@ -51,8 +51,13 @@ function buildOptions(menu: HTMLSelectElement, items: ReadonlyArray<string | num
 }
 
 function buildPresetOptions(isNoise: boolean): HTMLSelectElement {
-	const menu: HTMLSelectElement = select();
-	
+	return fillPresetOptions(select(), isNoise);
+}
+
+// Refilled in place when sample sets are registered, since those categories change at runtime.
+function fillPresetOptions(menu: HTMLSelectElement, isNoise: boolean): HTMLSelectElement {
+	menu.textContent = "";
+
 	menu.appendChild(optgroup({label: "Edit"},
 		option({value: "copyInstrument"}, "Copy Instrument (⇧C)"),
 		option({value: "pasteInstrument"}, "Paste Instrument (⇧V)"),
@@ -66,6 +71,7 @@ function buildPresetOptions(isNoise: boolean): HTMLSelectElement {
 		customTypeGroup.appendChild(option({value: InstrumentType.noise}, EditorConfig.valueToPreset(InstrumentType.noise)!.name));
 		customTypeGroup.appendChild(option({value: InstrumentType.spectrum}, EditorConfig.valueToPreset(InstrumentType.spectrum)!.name));
 		customTypeGroup.appendChild(option({value: InstrumentType.drumset}, EditorConfig.valueToPreset(InstrumentType.drumset)!.name));
+		customTypeGroup.appendChild(option({value: InstrumentType.sample}, EditorConfig.valueToPreset(InstrumentType.sample)!.name));
 	} else {
 		customTypeGroup.appendChild(option({value: InstrumentType.chip}, EditorConfig.valueToPreset(InstrumentType.chip)!.name));
 		customTypeGroup.appendChild(option({value: InstrumentType.pwm}, EditorConfig.valueToPreset(InstrumentType.pwm)!.name));
@@ -74,6 +80,7 @@ function buildPresetOptions(isNoise: boolean): HTMLSelectElement {
 		customTypeGroup.appendChild(option({value: InstrumentType.pickedString}, EditorConfig.valueToPreset(InstrumentType.pickedString)!.name));
 		customTypeGroup.appendChild(option({value: InstrumentType.spectrum}, EditorConfig.valueToPreset(InstrumentType.spectrum)!.name));
 		customTypeGroup.appendChild(option({value: InstrumentType.fm}, EditorConfig.valueToPreset(InstrumentType.fm)!.name));
+		customTypeGroup.appendChild(option({value: InstrumentType.sample}, EditorConfig.valueToPreset(InstrumentType.sample)!.name));
 	}
 	menu.appendChild(customTypeGroup);
 	
@@ -91,6 +98,18 @@ function buildPresetOptions(isNoise: boolean): HTMLSelectElement {
 		if (foundAny) menu.appendChild(group);
 	}
 	return menu;
+}
+
+// Hides every preset group except the chosen one (and the Edit group). A hidden
+// group's selected option still shows as the menu's value, so the current
+// instrument's name stays visible even when its group is filtered out.
+function applyPresetFilter(menu: HTMLSelectElement, groupLabel: string): void {
+	for (const child of Array.from(menu.children)) {
+		if (!(child instanceof HTMLOptGroupElement) || child.label == "Edit") continue;
+		const hidden: boolean = groupLabel != "" && child.label != groupLabel;
+		child.hidden = hidden;
+		child.style.display = hidden ? "none" : "";
+	}
 }
 
 function setSelectedValue(menu: HTMLSelectElement, value: number): void {
@@ -279,6 +298,10 @@ export class SongEditor {
 	private readonly _pitchedPresetSelect: HTMLSelectElement = buildPresetOptions(false);
 	private readonly _drumPresetSelect: HTMLSelectElement = buildPresetOptions(true);
 	private readonly _presetSearch: PresetSearch = new PresetSearch(() => this.doc.song.getChannelIsNoise(this.doc.channel) ? this._drumPresetSelect : this._pitchedPresetSelect);
+	private readonly _presetFilterSelect: HTMLSelectElement = select({title: "Only show one group of instruments in the menu below and in search"});
+	private _presetFilterBuiltFor: string = ""; // the menu contents the filter's options were last built from
+	private readonly _sampleSetSelect: HTMLSelectElement = select();
+	private readonly _sampleSetSelectRow: HTMLDivElement = div({class: "selectRow"}, span({class: "tip", onclick: ()=>this._openPrompt("instrumentType")}, "Sample:"), div({class: "selectContainer"}, this._sampleSetSelect));
 	private readonly _algorithmSelect: HTMLSelectElement = buildOptions(select(), Config.algorithms.map(algorithm=>algorithm.name));
 	private readonly _algorithmSelectRow: HTMLDivElement = div({class: "selectRow"}, span({class: "tip", onclick: ()=>this._openPrompt("algorithm")}, "Algorithm:"), div({class: "selectContainer"}, this._algorithmSelect));
 	private readonly _instrumentButtons: HTMLButtonElement[] = [];
@@ -356,6 +379,7 @@ export class SongEditor {
 	private readonly _customInstrumentSettingsGroup: HTMLDivElement = div({class: "editor-controls"},
 		this._eqFilterRow,
 		this._fadeInOutRow,
+		this._sampleSetSelectRow,
 		this._chipWaveSelectRow,
 		this._chipNoiseSelectRow,
 		this._algorithmSelectRow,
@@ -406,6 +430,10 @@ export class SongEditor {
 		div({class: "selectRow"},
 			span({class: "tip", onclick: ()=>this._openPrompt("instrumentType")}, "Search:"),
 			this._presetSearch.container,
+		),
+		div({class: "selectRow"},
+			span({class: "tip", onclick: ()=>this._openPrompt("instrumentType")}, "Filter:"),
+			div({class: "selectContainer"}, this._presetFilterSelect),
 		),
 		div({class: "selectRow"},
 			span({class: "tip", onclick: ()=>this._openPrompt("instrumentType")}, "Type:"),
@@ -665,6 +693,11 @@ export class SongEditor {
 		this._rhythmSelect.addEventListener("change", this._whenSetRhythm);
 		this._pitchedPresetSelect.addEventListener("change", this._whenSetPitchedPreset);
 		this._drumPresetSelect.addEventListener("change", this._whenSetDrumPreset);
+		this._presetFilterSelect.addEventListener("change", this._whenSetPresetFilter);
+		this._sampleSetSelect.addEventListener("change", this._whenSetSampleSet);
+		// Sets registered before the editor existed are picked up here; later ones via onChange.
+		this._refillPresetMenus();
+		SampleRegistry.onChange(this._whenSampleSetsChanged);
 		this._algorithmSelect.addEventListener("change", this._whenSetAlgorithm);
 		this._instrumentsButtonBar.addEventListener("click", this._whenSelectInstrument);
 		this._instrumentCopyButton.addEventListener("click", this._copyInstrument);
@@ -1071,15 +1104,15 @@ export class SongEditor {
 		this._measureVolumeLabel.textContent = "Measure " + (this.doc.bar + 1) + ":";
 		setSelectedValue(this._rhythmSelect, this.doc.song.rhythm);
 		
-		if (this.doc.song.getChannelIsNoise(this.doc.channel)) {
-			this._pitchedPresetSelect.style.display = "none";
-			this._drumPresetSelect.style.display = "";
-			setSelectedValue(this._drumPresetSelect, instrument.preset);
-		} else {
-			this._pitchedPresetSelect.style.display = "";
-			this._drumPresetSelect.style.display = "none";
-			setSelectedValue(this._pitchedPresetSelect, instrument.preset);
-		}
+		// A sample instrument shows its set's entry, found by name, because the stored
+		// preset value may come from a computer where different sets were registered.
+		const shownPreset: number = (instrument.type == InstrumentType.sample && instrument.preset != instrument.type) ? EditorConfig.presetValueForSampleSet(instrument.sampleSetName) : instrument.preset;
+		const channelIsNoise: boolean = this.doc.song.getChannelIsNoise(this.doc.channel);
+		const presetMenu: HTMLSelectElement = channelIsNoise ? this._drumPresetSelect : this._pitchedPresetSelect;
+		this._pitchedPresetSelect.style.display = channelIsNoise ? "none" : "";
+		this._drumPresetSelect.style.display = channelIsNoise ? "" : "none";
+		setSelectedValue(presetMenu, shownPreset);
+		this._renderPresetFilter(presetMenu);
 		
 		if (prefs.instrumentCopyPaste) {
 			this._instrumentCopyPasteRow.style.display = "";
@@ -1099,6 +1132,12 @@ export class SongEditor {
 				setSelectedValue(this._chipNoiseSelect, instrument.chipNoise);
 			} else {
 				this._chipNoiseSelectRow.style.display = "none";
+			}
+			if (instrument.type == InstrumentType.sample) {
+				this._sampleSetSelectRow.style.display = "";
+				this._renderSampleSetSelect(instrument, channelIsNoise);
+			} else {
+				this._sampleSetSelectRow.style.display = "none";
 			}
 			if (instrument.type == InstrumentType.spectrum) {
 				this._spectrumRow.style.display = "";
@@ -2044,6 +2083,60 @@ export class SongEditor {
 		this._setPreset(this._drumPresetSelect.value);
 	}
 	
+	private _refillPresetMenus(): void {
+		EditorConfig.refreshSamplePresets();
+		fillPresetOptions(this._pitchedPresetSelect, false);
+		fillPresetOptions(this._drumPresetSelect, true);
+		this._presetFilterBuiltFor = "";
+	}
+
+	private _whenSampleSetsChanged = (): void => {
+		this._refillPresetMenus();
+		this.whenUpdated();
+	}
+
+	private _whenSetPresetFilter = (): void => {
+		this.whenUpdated();
+	}
+
+	private _whenSetSampleSet = (): void => {
+		if (this._sampleSetSelect.value != "") this.doc.record(new ChangeSampleSet(this.doc, this._sampleSetSelect.value));
+	}
+
+	// The filter offers the groups the current menu actually has, which differ
+	// between pitched and drum channels and grow as sample sets are registered.
+	private _renderPresetFilter(menu: HTMLSelectElement): void {
+		const labels: string[] = Array.from(menu.children)
+			.filter((child): child is HTMLOptGroupElement => child instanceof HTMLOptGroupElement && child.label != "Edit")
+			.map(group => group.label);
+		const builtFor: string = labels.join("\n");
+		if (builtFor != this._presetFilterBuiltFor) {
+			const previous: string = this._presetFilterSelect.value;
+			this._presetFilterSelect.textContent = "";
+			this._presetFilterSelect.appendChild(option({value: ""}, "All instruments"));
+			for (const label of labels) this._presetFilterSelect.appendChild(option({value: label}, label));
+			this._presetFilterSelect.value = (labels.indexOf(previous) != -1) ? previous : "";
+			this._presetFilterBuiltFor = builtFor;
+		}
+		applyPresetFilter(menu, this._presetFilterSelect.value);
+	}
+
+	private _renderSampleSetSelect(instrument: Instrument, isNoise: boolean): void {
+		const names: string[] = SampleRegistry.list().filter(set => set.isNoise == isNoise).map(set => set.name);
+		const current: string = instrument.sampleSetName;
+		const entries: {value: string, label: string}[] = [];
+		if (current == "") entries.push({value: "", label: "(choose a sample)"});
+		else if (names.indexOf(current) == -1) entries.push({value: current, label: current + " (not on this computer)"});
+		for (const name of names) entries.push({value: name, label: name});
+		const signature: string = entries.map(entry => entry.value + "\t" + entry.label).join("\n");
+		if (this._sampleSetSelect.getAttribute("data-signature") != signature) {
+			this._sampleSetSelect.textContent = "";
+			for (const entry of entries) this._sampleSetSelect.appendChild(option({value: entry.value}, entry.label));
+			this._sampleSetSelect.setAttribute("data-signature", signature);
+		}
+		if (this._sampleSetSelect.value != current) this._sampleSetSelect.value = current;
+	}
+
 	private _setPreset(preset: string): void {
 		if (isNaN(<number> <unknown> preset)) {
 			switch (preset) {

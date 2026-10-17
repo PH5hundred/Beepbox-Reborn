@@ -41,6 +41,8 @@ export class PresetSearch {
 		for (const option of Array.from(this._getMenu().options)) {
 			// The Edit group (copy, paste, random) has words for values, not presets.
 			if (isNaN(Number(option.value))) continue;
+			// Groups hidden by the instrument filter stay out of search too.
+			if (option.parentElement instanceof HTMLOptGroupElement && option.parentElement.hidden) continue;
 			const group: string = (option.parentElement instanceof HTMLOptGroupElement) ? option.parentElement.label : "";
 			const name: string = option.text.trim().toLowerCase();
 			const haystack: string = name + " " + group.toLowerCase();

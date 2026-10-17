@@ -1,6 +1,7 @@
 // Copyright (c) John Nesky and contributing authors, distributed under the MIT license, see accompanying the LICENSE.md file.
 
 import {DictionaryArray, BeepBoxOption, InstrumentType, toNameMap} from "../synth/SynthConfig.js";
+import {SampleRegistry, SampleCategory} from "../synth/SampleRegistry.js";
 
 export interface PresetCategory extends BeepBoxOption {
 	readonly presets: DictionaryArray<Preset>;
@@ -60,6 +61,7 @@ export class EditorConfig {
 			{name: "pulse width",      customType: InstrumentType.pwm},
 			{name: "picked string",    customType: InstrumentType.pickedString},
 			{name: "supersaw",         customType: InstrumentType.supersaw},
+			{name: "sample",           customType: InstrumentType.sample},
 		])},
 		{name: "Retro Presets", presets: <DictionaryArray<Preset>> toNameMap([
 			{name: "square wave",      midiProgram:  80, settings: {"type":"chip","eqFilter":[],"effects":[],"transition":"interrupt","fadeInSeconds":0,"fadeOutTicks":-1,"chord":"arpeggio","wave":"square","unison":"none","envelopes":[]}},
@@ -318,12 +320,46 @@ export class EditorConfig {
 			{name: "soft square pad",     midiProgram:  89, settings: {"type":"chip","eqFilter":[{"type":"low-pass","cutoffHz":3363.59,"linearGain":1.4142}],"effects":["reverb","chorus"],"transition":"normal","fadeInSeconds":0.0938,"fadeOutTicks":48,"chord":"simultaneous","wave":"rounded","unison":"hum","envelopes":[],"reverb":67,"chorus":50}},
 			{name: "blip arp",            midiProgram:  80, settings: {"type":"PWM","eqFilter":[{"type":"low-pass","cutoffHz":8000,"linearGain":1}],"effects":["chord type"],"transition":"normal","fadeInSeconds":0.0,"fadeOutTicks":6,"chord":"arpeggio","pulseWidth":25,"envelopes":[]}},
 		])},
+		// Filled at runtime from SampleRegistry by refreshSamplePresets(); empty until something registers audio.
+		{name: "Imported", presets: <DictionaryArray<Preset>> toNameMap([])},
+		{name: "Sampled Instruments", presets: <DictionaryArray<Preset>> toNameMap([])},
 	]);
-	
+
+	private static readonly _sampleCategoryNames: {readonly [category in SampleCategory]: string} = {"imported": "Imported", "sampled": "Sampled Instruments"};
+
+	// Entries are indexed by registration order within their category, which is
+	// what keeps a preset's menu value stable while the page is open.
+	public static refreshSamplePresets(): void {
+		for (const category of <SampleCategory[]> ["imported", "sampled"]) {
+			const presets: any = EditorConfig.presetCategories.dictionary[EditorConfig._sampleCategoryNames[category]].presets;
+			presets.length = 0;
+			presets.dictionary = {};
+			for (const set of SampleRegistry.list()) {
+				if (set.category != category || presets.length >= 64) continue;
+				const preset: Preset = {index: presets.length, name: set.name, isNoise: set.isNoise, settings: {"type":"sample","eqFilter":[],"effects":["reverb"],"reverb":33,"transition":"normal","fadeInSeconds":0,"fadeOutTicks":24,"chord":"simultaneous","sampleSet":set.name,"envelopes":[]}};
+				presets.push(preset);
+				presets.dictionary[set.name] = preset;
+			}
+		}
+	}
+
+	// The value a menu should show for a sample instrument: its set's own entry if
+	// one is registered here, otherwise the plain "sample" type.
+	public static presetValueForSampleSet(name: string): number {
+		for (const sampleCategory of <SampleCategory[]> ["imported", "sampled"]) {
+			const category: PresetCategory = EditorConfig.presetCategories.dictionary[EditorConfig._sampleCategoryNames[sampleCategory]];
+			const preset: Preset | undefined = category.presets.dictionary[name];
+			if (preset != undefined) return (category.index << 6) + preset.index;
+		}
+		return InstrumentType.sample;
+	}
+
 	public static valueToPreset(presetValue: number): Preset | null {
 		const categoryIndex: number = presetValue >> 6;
 		const presetIndex: number = presetValue & 0x3F;
-		return EditorConfig.presetCategories[categoryIndex].presets[presetIndex];
+		const category: PresetCategory | undefined = EditorConfig.presetCategories[categoryIndex];
+		// A song made where more samples were registered can point past the end of a dynamic category.
+		return (category == undefined) ? null : (category.presets[presetIndex] ?? null);
 	}
 	
 	public static midiProgramToPresetValue(program: number): number | null {

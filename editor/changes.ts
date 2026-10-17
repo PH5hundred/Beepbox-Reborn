@@ -3306,6 +3306,19 @@ export class ChangeChipWave extends Change {
 	}
 }
 
+export class ChangeSampleSet extends Change {
+	constructor(doc: SongDocument, newValue: string) {
+		super();
+		const instrument: Instrument = doc.song.channels[doc.channel].instruments[doc.getCurrentInstrument()];
+		if (instrument.sampleSetName != newValue) {
+			instrument.sampleSetName = newValue;
+			instrument.preset = instrument.type;
+			doc.notifier.changed();
+			this._didSomething();
+		}
+	}
+}
+
 export class ChangeNoiseWave extends Change {
 	constructor(doc: SongDocument, newValue: number) {
 		super();

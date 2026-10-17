@@ -63,6 +63,7 @@ export const enum InstrumentType {
 	pwm,
 	pickedString,
 	supersaw,
+	sample,
 	length,
 }
 
@@ -283,8 +284,8 @@ export class Config {
 		{name: "freehand",      stepsPerBeat:24, ticksPerArpeggio: 3, arpeggioPatterns: [[0], [0, 1],       [0, 1, 2, 1]], roundUpThresholds: null},
 	]);
 	
-	public static readonly instrumentTypeNames: ReadonlyArray<string> = ["chip", "FM", "noise", "spectrum", "drumset", "harmonics", "PWM", "Picked String", "supersaw"]; // See InstrumentType enum above.
-	public static readonly instrumentTypeHasSpecialInterval: ReadonlyArray<boolean> = [true, true, false, false, false, true, false, false, false];
+	public static readonly instrumentTypeNames: ReadonlyArray<string> = ["chip", "FM", "noise", "spectrum", "drumset", "harmonics", "PWM", "Picked String", "supersaw", "sample"]; // See InstrumentType enum above.
+	public static readonly instrumentTypeHasSpecialInterval: ReadonlyArray<boolean> = [true, true, false, false, false, true, false, false, false, false];
 	public static readonly chipBaseExpression:      number = 0.03375; // Doubled by unison feature, but affected by expression adjustments per unison setting and wave shape.
 	public static readonly fmBaseExpression:        number = 0.03;
 	public static readonly noiseBaseExpression:     number = 0.19;
@@ -294,6 +295,7 @@ export class Config {
 	public static readonly pwmBaseExpression:       number = 0.04725; // It's actually closer to half of this, the synthesized pulse amplitude range is only .5 to -.5, but also note that the fundamental sine partial amplitude of a square wave is 4/π times the measured square wave amplitude.
 	public static readonly supersawBaseExpression:  number = 0.061425; // It's actually closer to half of this, the synthesized sawtooth amplitude range is only .5 to -.5.
 	public static readonly pickedStringBaseExpression: number = 0.025; // Same as harmonics.
+	public static readonly sampleBaseExpression:    number = 0.05; // A recording peak-normalised to 1 lands near the loudness of a comparable harmonics instrument.
 	public static readonly distortionBaseVolume:    number = 0.011; // Distortion is not affected by pitchDamping, which otherwise approximately halves expression for notes around the middle of the range.
 	public static readonly bitcrusherBaseVolume:    number = 0.010; // Also not affected by pitchDamping, used when bit crushing is maxed out (aka "1-bit" output).
 	

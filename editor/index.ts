@@ -5,7 +5,7 @@ export {EditorConfig} from "./EditorConfig.js";
 export {ColorConfig} from "./ColorConfig.js";
 import "./style.js"; // Import for the side effects, there's no exports.
 export {SongEditor} from "./SongEditor.js";
-export {NotePin, Note, Pattern, Instrument, Channel, Song, Synth} from "../synth/synth.js";
+export {NotePin, Note, Pattern, Instrument, Channel, Song, Synth, SampleRegistry} from "../synth/synth.js";
 export {SongDocument} from "./SongDocument.js";
 export {ExportPrompt} from "./ExportPrompt.js";
 export {ChangePreset} from "./changes.js";

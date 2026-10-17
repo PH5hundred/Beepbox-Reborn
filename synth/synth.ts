@@ -5,6 +5,9 @@ import {scaleElementsByFactor, fastFourierTransform, forwardRealFourierTransform
 import {Deque} from "./Deque.js";
 import {FilterCoefficients, FrequencyResponse, DynamicBiquadFilter, warpInfinityToNyquist} from "./filtering.js";
 import {RepeatSection, RepeatTracker, sanitizeRepeatSections} from "./RepeatSections.js";
+import {SampleRegistry, SampleZone} from "./SampleRegistry.js";
+export {SampleRegistry} from "./SampleRegistry.js";
+export type {SampleZone, SampleSet, SampleCategory, SampleSetOptions} from "./SampleRegistry.js";
 
 export {RepeatSection, RepeatTracker, sanitizeRepeatSections, getRepeatSectionDepth} from "./RepeatSections.js";
 
@@ -165,7 +168,7 @@ const enum SongTagCode {
 //	                    = CharCode.X, // added in JummBox URL version 4 for aliases, DEPRECATED
 	masterVolume        = CharCode.Y, // added in Beepbox Reborn for the song-wide volume
 	barVolumes          = CharCode.Z, // added in Beepbox Reborn for per-measure volume
-//	                    = CharCode.NUM_0,
+	sampleSet           = CharCode.NUM_0, // added in Beepbox Reborn for the sample instrument's set name
 //	                    = CharCode.NUM_1,
 //	                    = CharCode.NUM_2,
 //	                    = CharCode.NUM_3,
@@ -1025,6 +1028,7 @@ export class Instrument {
 	public supersawShape: number = 0;
 	public stringSustain: number = 10;
 	public stringSustainType: SustainType = SustainType.acoustic;
+	public sampleSetName: string = "";
 	public distortion: number = 0;
 	public bitcrusherFreq: number = 0;
 	public bitcrusherQuantization: number = 0;
@@ -1125,6 +1129,10 @@ export class Instrument {
 				this.supersawSpread = Math.ceil(Config.supersawSpreadMax / 2.0);
 				this.supersawShape = 0;
 				this.pulseWidth = Config.pulseWidthRange - 1;
+				break;
+			case InstrumentType.sample:
+				this.chord = Config.chords.dictionary["simultaneous"].index;
+				this.sampleSetName = "";
 				break;
 			default:
 				throw new Error("Unrecognized instrument type: " + type);
@@ -1335,6 +1343,8 @@ export class Instrument {
 			instrumentObject["feedbackType"] = Config.feedbacks[this.feedbackType].name;
 			instrumentObject["feedbackAmplitude"] = this.feedbackAmplitude;
 			instrumentObject["operators"] = operatorArray;
+		} else if (this.type == InstrumentType.sample) {
+			instrumentObject["sampleSet"] = this.sampleSetName;
 		} else {
 			throw new Error("Unrecognized instrument type");
 		}
@@ -1603,6 +1613,10 @@ export class Instrument {
 			}
 		}
 		
+		if (this.type == InstrumentType.sample && typeof instrumentObject["sampleSet"] == "string") {
+			this.sampleSetName = instrumentObject["sampleSet"].substring(0, Instrument.maxSampleSetNameLength);
+		}
+
 		if (this.type == InstrumentType.chip) {
 			const legacyWaveNames: Dictionary<number> = {"triangle": 1, "square": 2, "pulse wide": 3, "pulse narrow": 4, "sawtooth": 5, "double saw": 6, "double pulse": 7, "spiky": 8, "plateau": 0};
 			this.chipWave = legacyWaveNames[instrumentObject["wave"]] != undefined ? legacyWaveNames[instrumentObject["wave"]] : Config.chipWaves.findIndex(wave=>wave.name==instrumentObject["wave"]);
@@ -1707,6 +1721,9 @@ export class Instrument {
 	public static frequencyFromPitch(pitch: number): number {
 		return 440.0 * Math.pow(2.0, (pitch - 69.0) / 12.0);
 	}
+
+	// The URL stores the name's length in two base64 characters.
+	public static readonly maxSampleSetNameLength: number = 4095;
 	
 	public addEnvelope(target: number, index: number, envelope: number): void {
 		if (!this.supportsEnvelopeTarget(target, index)) throw new Error();
@@ -2117,6 +2134,14 @@ export class Song {
 						throw new Error("Not enough bits to represent sustain value and type in same base64 character.");
 					}
 					buffer.push(SongTagCode.stringSustain, base64IntToCharCode[instrument.stringSustain | (instrument.stringSustainType << 5)]);
+				} else if (instrument.type == InstrumentType.sample) {
+					// Length in two characters, then each UTF-16 code unit in three.
+					const name: string = instrument.sampleSetName.substring(0, Instrument.maxSampleSetNameLength);
+					buffer.push(SongTagCode.sampleSet, base64IntToCharCode[name.length >> 6], base64IntToCharCode[name.length & 63]);
+					for (let i: number = 0; i < name.length; i++) {
+						const code: number = name.charCodeAt(i);
+						buffer.push(base64IntToCharCode[code >> 12], base64IntToCharCode[(code >> 6) & 63], base64IntToCharCode[code & 63]);
+					}
 				} else {
 					throw new Error("Unknown instrument type.");
 				}
@@ -2721,6 +2746,15 @@ export class Song {
 				instrument.supersawDynamism = clamp(0, Config.supersawDynamismMax + 1, base64CharCodeToInt[compressed.charCodeAt(charIndex++)]);
 				instrument.supersawSpread = clamp(0, Config.supersawSpreadMax + 1, base64CharCodeToInt[compressed.charCodeAt(charIndex++)]);
 				instrument.supersawShape = clamp(0, Config.supersawShapeMax + 1, base64CharCodeToInt[compressed.charCodeAt(charIndex++)]);
+			} break;
+			case SongTagCode.sampleSet: {
+				const instrument: Instrument = this.channels[instrumentChannelIterator].instruments[instrumentIndexIterator];
+				const length: number = (base64CharCodeToInt[compressed.charCodeAt(charIndex++)] << 6) | base64CharCodeToInt[compressed.charCodeAt(charIndex++)];
+				let name: string = "";
+				for (let i: number = 0; i < length; i++) {
+					name += String.fromCharCode((base64CharCodeToInt[compressed.charCodeAt(charIndex++)] << 12) | (base64CharCodeToInt[compressed.charCodeAt(charIndex++)] << 6) | base64CharCodeToInt[compressed.charCodeAt(charIndex++)]);
+				}
+				instrument.sampleSetName = name;
 			} break;
 			case SongTagCode.stringSustain: {
 				const instrument: Instrument = this.channels[instrumentChannelIterator].instruments[instrumentIndexIterator];
@@ -4127,7 +4161,9 @@ class Tone {
 	public supersawDelayIndex: number = -1;
 	public supersawPrevPhaseDelta: number | null = null;
 	public readonly pickedStrings: PickedString[] = [];
-	
+	public sampleZone: SampleZone | null = null;
+	public samplePosition: number = 0.0; // in source samples
+
 	public readonly noteFilters: DynamicBiquadFilter[] = [];
 	public noteFilterCount: number = 0;
 	public initialNoteFilterInput1: number = 0.0;
@@ -4167,6 +4203,8 @@ class Tone {
 		this.prevStringDecay = null;
 		this.supersawPrevPhaseDelta = null;
 		this.drumsetPitch = null;
+		this.sampleZone = null;
+		this.samplePosition = 0.0;
 	}
 }
 
@@ -5879,6 +5917,12 @@ export class Synth {
 			baseExpression = Config.supersawBaseExpression;
 		} else if (instrument.type == InstrumentType.pickedString) {
 			baseExpression = Config.pickedStringBaseExpression;
+		} else if (instrument.type == InstrumentType.sample) {
+			baseExpression = Config.sampleBaseExpression;
+			// Drum slots map to MIDI pitches the same way as spectrum drums do.
+			if (isNoiseChannel) basePitch = Config.spectrumBasePitch;
+			// A recording already carries its own loudness at each pitch.
+			pitchDamping = Infinity;
 		} else {
 			throw new Error("Unknown instrument type in computeTone.");
 		}
@@ -6274,6 +6318,20 @@ export class Synth {
 				tone.phaseDeltas[0] = startFreq * sampleTime;
 				tone.phaseDeltaScales[0] = basePhaseDeltaScale;
 			}
+
+			if (instrument.type == InstrumentType.sample) {
+				// The zone is picked once per note so a bend or vibrato can't hop between recordings.
+				if (tone.sampleZone == null) {
+					const sampleSet = SampleRegistry.get(instrument.sampleSetName);
+					if (sampleSet != undefined) {
+						tone.sampleZone = SampleRegistry.findZone(sampleSet, Math.round(startPitch));
+						tone.samplePosition = 0.0;
+					}
+				}
+				// phaseDeltas[0] becomes source samples per output sample.
+				const zone: SampleZone | null = tone.sampleZone;
+				tone.phaseDeltas[0] = (zone == null) ? 0.0 : startFreq * sampleTime * zone.sampleRate / Instrument.frequencyFromPitch(zone.rootKey);
+			}
 			
 			// TODO: make expressionStart and expressionEnd variables earlier and modify those
 			// instead of these supersawExpression variables.
@@ -6532,9 +6590,82 @@ export class Synth {
 			return Synth.spectrumSynth;
 		} else if (instrument.type == InstrumentType.drumset) {
 			return Synth.drumsetSynth;
+		} else if (instrument.type == InstrumentType.sample) {
+			return Synth.sampleSynth;
 		} else {
 			throw new Error("Unrecognized instrument type: " + instrument.type);
 		}
+	}
+
+	private static sampleSynth(synth: Synth, bufferIndex: number, runLength: number, tone: Tone, instrumentState: InstrumentState): void {
+		const zone: SampleZone | null = tone.sampleZone;
+		if (zone == null) return; // The song names a sample set this computer doesn't have.
+		const data: Float32Array = synth.tempMonoInstrumentSampleBuffer!;
+		const source: Float32Array = zone.data;
+		const sourceLength: number = source.length;
+		const looping: boolean = zone.loopStart != undefined && zone.loopEnd != undefined && zone.loopEnd > zone.loopStart && zone.loopEnd <= sourceLength;
+		const loopStart: number = looping ? zone.loopStart! : 0;
+		const loopEnd: number = looping ? zone.loopEnd! : sourceLength;
+		const loopLength: number = loopEnd - loopStart;
+		// Past the loop end, reads wrap back into the loop; past the end of a one-shot, they're silent.
+		const read = (index: number): number => {
+			if (index < 0) return source[0];
+			if (looping) {
+				while (index >= loopEnd) index -= loopLength;
+				return source[index];
+			}
+			return (index < sourceLength) ? source[index] : 0.0;
+		};
+
+		let position: number = +tone.samplePosition;
+		let step: number = +tone.phaseDeltas[0];
+		const stepScale: number = +tone.phaseDeltaScales[0];
+		let expression: number = +tone.expression;
+		const expressionDelta: number = +tone.expressionDelta;
+
+		const filters: DynamicBiquadFilter[] = tone.noteFilters;
+		const filterCount: number = tone.noteFilterCount|0;
+		let initialFilterInput1: number = +tone.initialNoteFilterInput1;
+		let initialFilterInput2: number = +tone.initialNoteFilterInput2;
+		const applyFilters: Function = Synth.applyFilters;
+
+		const stopIndex: number = bufferIndex + runLength;
+		for (let sampleIndex: number = bufferIndex; sampleIndex < stopIndex; sampleIndex++) {
+			let inputSample: number = 0.0;
+			if (looping || position < sourceLength) {
+				// 4-point, 3rd-order Hermite interpolation.
+				const index: number = position|0;
+				const t: number = position - index;
+				const y0: number = read(index - 1);
+				const y1: number = read(index);
+				const y2: number = read(index + 1);
+				const y3: number = read(index + 2);
+				const c1: number = 0.5 * (y2 - y0);
+				const c2: number = y0 - 2.5 * y1 + 2.0 * y2 - 0.5 * y3;
+				const c3: number = 0.5 * (y3 - y0) + 1.5 * (y1 - y2);
+				inputSample = ((c3 * t + c2) * t + c1) * t + y1;
+			}
+			position += step;
+			if (looping && position >= loopEnd) position = loopStart + (position - loopStart) % loopLength;
+			step *= stepScale;
+
+			const sample: number = applyFilters(inputSample, initialFilterInput1, initialFilterInput2, filterCount, filters);
+			initialFilterInput2 = initialFilterInput1;
+			initialFilterInput1 = inputSample;
+
+			const output: number = sample * expression;
+			expression += expressionDelta;
+
+			data[sampleIndex] += output;
+		}
+
+		tone.samplePosition = position;
+		tone.phaseDeltas[0] = step;
+		tone.expression = expression;
+
+		synth.sanitizeFilters(filters);
+		tone.initialNoteFilterInput1 = initialFilterInput1;
+		tone.initialNoteFilterInput2 = initialFilterInput2;
 	}
 	
 	private static chipSynth(synth: Synth, bufferIndex: number, runLength: number, tone: Tone, instrumentState: InstrumentState): void {
