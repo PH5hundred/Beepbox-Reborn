@@ -1957,6 +1957,42 @@ export class Song {
 			Song.volumeStepToMult(this.masterVolume);
 	}
 	
+	// Every bar an export plays, in order, with repeat sections unrolled the same
+	// way Synth.getNextBar walks them. barCount alone undercounts any song with
+	// repeats, which is what cut long exports off before their real ending.
+	// loopPassEnds, when given, receives the position in the order where each
+	// pass through the loop ends, for the MIDI loop markers.
+	public getPlaybackBarOrder(enableIntro: boolean, loopCount: number, enableOutro: boolean, loopPassEnds?: number[]): number[] {
+		const tracker: RepeatTracker = new RepeatTracker();
+		tracker.setSections(this.repeatSections);
+		const loopEnd: number = this.loopStart + this.loopLength;
+		let loopsLeft: number = Math.max(0, loopCount - 1);
+		let bar: number = enableIntro ? 0 : this.loopStart;
+		const order: number[] = [];
+		// A guard against a malformed song looping forever, far beyond any real one.
+		const maxBars: number = 100000;
+		while (order.length < maxBars) {
+			order.push(bar);
+			let nextBar: number = tracker.advancePastBar(bar);
+			if (nextBar == -1) {
+				nextBar = bar + 1;
+				if (nextBar == loopEnd) {
+					if (loopPassEnds != undefined) loopPassEnds.push(order.length);
+					if (loopsLeft > 0) {
+						loopsLeft--;
+						nextBar = this.loopStart;
+						tracker.reset();
+					} else if (!enableOutro) {
+						break;
+					}
+				}
+			}
+			if (nextBar >= this.barCount) break;
+			bar = nextBar;
+		}
+		return order;
+	}
+
 	public getMaxInstrumentsPerChannel(): number {
 		return Math.max(
 			this.layeredInstruments ? Config.layeredInstrumentCountMax : Config.instrumentCountMin,
@@ -5012,6 +5048,9 @@ export class Synth {
 	public loopRepeatCount: number = -1;
 	private readonly repeatTracker: RepeatTracker = new RepeatTracker();
 	private repeatSectionsSignature: string = "";
+	// Set by getNextBar when the move was back to the loop start, so a repeat
+	// section's jump back does not use up one of the export's loop passes.
+	private tookLoopJump: boolean = false;
 	public volume: number = 1.0;
 	public enableMetronome: boolean = false;
 	public countInMetronome: boolean = false;
@@ -5100,10 +5139,7 @@ export class Synth {
 	
 	public getTotalBars(enableIntro: boolean, enableOutro: boolean): number {
 		if (this.song == null) throw new Error();
-		let bars: number = this.song.loopLength * (this.loopRepeatCount + 1);
-		if (enableIntro) bars += this.song.loopStart;
-		if (enableOutro) bars += this.song.barCount - (this.song.loopStart + this.song.loopLength);
-		return bars;
+		return this.song.getPlaybackBarOrder(enableIntro, this.loopRepeatCount + 1, enableOutro).length;
 	}
 	
 	constructor(song: Song | string | null = null) {
@@ -5250,6 +5286,7 @@ export class Synth {
 	// not advanced by merely peeking.
 	private getNextBar(commit: boolean = true): number {
 		let nextBar: number = this.bar + 1;
+		if (commit) this.tookLoopJump = false;
 		if (this.isRecording) {
 			if (nextBar >= this.song!.barCount) {
 				nextBar = this.song!.barCount - 1;
@@ -5265,7 +5302,10 @@ export class Synth {
 
 		if (this.loopRepeatCount != 0 && nextBar == this.song!.loopStart + this.song!.loopLength) {
 			nextBar = this.song!.loopStart;
-			if (commit) this.repeatTracker.reset();
+			if (commit) {
+				this.repeatTracker.reset();
+				this.tookLoopJump = true;
+			}
 		}
 		return nextBar;
 	}
@@ -5335,7 +5375,7 @@ export class Synth {
 				
 				this.prevBar = this.bar;
 				this.bar = this.getNextBar();
-				if (this.bar <= this.prevBar && this.loopRepeatCount > 0) this.loopRepeatCount--;
+				if (this.tookLoopJump && this.loopRepeatCount > 0) this.loopRepeatCount--;
 			}
 			if (this.bar >= song.barCount) {
 				this.bar = 0;
@@ -5528,7 +5568,7 @@ export class Synth {
 								} else {
 									this.prevBar = this.bar;
 									this.bar = this.getNextBar();
-									if (this.bar <= this.prevBar && this.loopRepeatCount > 0) this.loopRepeatCount--;
+									if (this.tookLoopJump && this.loopRepeatCount > 0) this.loopRepeatCount--;
 									
 									if (this.bar >= song.barCount) {
 										this.bar = 0;

@@ -355,22 +355,12 @@ export class ExportPrompt implements Prompt {
 		const pitchBendRange: number = 24;
 		const defaultNoteVelocity: number = 90;
 		
-		const unrolledBars: number[] = [];
-		if (this._enableIntro.checked) {
-			for (let bar: number = 0; bar < song.loopStart; bar++) {
-				unrolledBars.push(bar);
-			}
-		}
-		for (let loopIndex: number = 0; loopIndex < Number(this._loopDropDown.value); loopIndex++) {
-			for (let bar: number = song.loopStart; bar < song.loopStart + song.loopLength; bar++) {
-				unrolledBars.push(bar);
-			}
-		}
-		if (this._enableOutro.checked) {
-			for (let bar: number = song.loopStart + song.loopLength; bar < song.barCount; bar++) {
-				unrolledBars.push(bar);
-			}
-		}
+		const loopPassEnds: number[] = [];
+		const unrolledBars: number[] = song.getPlaybackBarOrder(this._enableIntro.checked, Number(this._loopDropDown.value), this._enableOutro.checked, loopPassEnds);
+		// Repeat sections can play intro bars more than once, so the loop starts
+		// wherever the order first reaches it rather than at loopStart bars in.
+		let loopStartIndex: number = unrolledBars.findIndex(bar => bar >= song.loopStart);
+		if (loopStartIndex == -1) loopStartIndex = unrolledBars.length;
 		
 		const tracks = [{isMeta:  true, channel: -1, midiChannel: -1, isNoise: false, isDrumset: false}];
 		let midiChannelCounter: number = 0;
@@ -454,22 +444,21 @@ export class ExportPrompt implements Prompt {
 				writer.writeInt8(numSharps); // See above calculation. Assumes scale is diatonic. :/
 				writer.writeUint8(isMinor ? 1 : 0); // 0: major, 1: minor
 				
-				if (this._enableIntro.checked) barStartTime += midiTicksPerBar * song.loopStart;
+				barStartTime = midiTicksPerBar * loopStartIndex;
 				writeEventTime(barStartTime);
 				writer.writeUint8(MidiEventType.meta);
 				writer.writeMidi7Bits(MidiMetaEventMessage.marker);
 				writer.writeMidiAscii("Loop Start");
 				
-				for (let loopIndex: number = 0; loopIndex < parseInt(this._loopDropDown.value); loopIndex++) {
-					barStartTime += midiTicksPerBar * song.loopLength;
+				for (let loopIndex: number = 0; loopIndex < loopPassEnds.length; loopIndex++) {
+					barStartTime = midiTicksPerBar * loopPassEnds[loopIndex];
 					writeEventTime(barStartTime);
 					writer.writeUint8(MidiEventType.meta);
 					writer.writeMidi7Bits(MidiMetaEventMessage.marker);
-					writer.writeMidiAscii(loopIndex < Number(this._loopDropDown.value) - 1 ? "Loop Repeat" : "Loop End");
+					writer.writeMidiAscii(loopIndex < loopPassEnds.length - 1 ? "Loop Repeat" : "Loop End");
 				}
 				
-				if (this._enableOutro.checked) barStartTime += midiTicksPerBar * (song.barCount - song.loopStart - song.loopLength);
-				if (barStartTime != midiTicksPerBar * unrolledBars.length) throw new Error("Miscalculated number of bars.");
+				barStartTime = midiTicksPerBar * unrolledBars.length;
 				
 			} else {
 				// For remaining tracks, set up the instruments and write the notes:

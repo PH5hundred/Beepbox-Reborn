@@ -28,6 +28,7 @@ class PatternCursor {
 	public curIndex:     number = 0;
 	public curLayer:     number = 0; // Which overlap layer curNote, prevNote, nextNote and curIndex refer to.
 	public coverNote:    Note | null = null; // With overlaps allowed: the top note under the cursor at another pitch.
+	public pointerStart: number = 0; // Where a new note would start before being shifted to fit the bar.
 	public start:        number = 0;
 	public end:          number = 0;
 	public part:         number = 0;
@@ -240,10 +241,13 @@ export class PatternEditor {
 					if (note.start <= cursorPartForMatching) this._cursor.curIndex++;
 				}
 			}
-			if (layered && this._cursor.curNote == null && this._cursor.coverNote == null) {
-				// Fit a clicked note into the gap between notes in every layer.
+			if (layered && this._cursor.curNote == null) {
 				this._cursor.prevNote = null;
 				this._cursor.nextNote = null;
+			}
+			if (layered && this._cursor.curNote == null && this._cursor.coverNote == null && !this._doc.prefs.allowOverlappingNotes) {
+				// Fit a clicked note into the gap between notes in every layer. With
+				// overlaps allowed it is left at full length and stacks instead.
 				for (const note of this._pattern.allNotes()) {
 					if (note.end <= cursorPartForMatching && (this._cursor.prevNote == null || note.end > this._cursor.prevNote.end)) this._cursor.prevNote = note;
 					if (note.start > cursorPartForMatching && (this._cursor.nextNote == null || note.start < this._cursor.nextNote.start)) this._cursor.nextNote = note;
@@ -348,6 +352,7 @@ export class PatternEditor {
 				}
 				this._cursor.start += Math.floor(modMouse / division) * division;
 			}
+			this._cursor.pointerStart = this._cursor.start;
 			this._cursor.end = this._cursor.start + defaultLength;
 			let forceStart: number = 0;
 			let forceEnd: number = partsPerPattern;
@@ -391,6 +396,14 @@ export class PatternEditor {
 			}
 		}
 		
+		// A click over another note only joins its chord when the new note would
+		// span exactly the same time; otherwise it is a new note stacked on top,
+		// the same as clicking in empty space.
+		const coverNote: Note | null = this._cursor.coverNote;
+		if (coverNote != null && (coverNote.start != this._cursor.start || coverNote.end != this._cursor.end)) {
+			this._cursor.coverNote = null;
+		}
+		
 		this._cursor.valid = true;
 	}
 	
@@ -411,8 +424,11 @@ export class PatternEditor {
 				coverNote = note;
 			}
 			const interval: number = PatternEditor._noteIntervalAt(note, part);
+			// With overlaps allowed only the note's own row grabs it, so a note can
+			// be drawn on the very next pitch without grabbing the one beside it.
+			const reach: number = this._doc.prefs.allowOverlappingNotes ? 0.5 : 1.0;
 			for (const pitch of note.pitches) {
-				if (Math.abs(mousePitch - (pitch + interval + 0.5)) < 1.0) return layer;
+				if (Math.abs(mousePitch - (pitch + interval + 0.5)) < reach) return layer;
 			}
 		}
 		if (coverNote == null) return 0;
@@ -754,14 +770,18 @@ export class PatternEditor {
 				if (this._cursor.curNote == null) {
 					sequence.append(new ChangePatternSelection(this._doc, 0, 0));
 					
+					// The cursor's start is shifted left so a click fits the default length
+					// in the bar. A drag draws from where it began, which matters once
+					// overlaps are on and a long default length is routine.
+					const anchor: number = this._doc.prefs.allowOverlappingNotes ? this._cursor.pointerStart : this._cursor.start;
 					let backwards: boolean;
 					let directLength: number;
-					if (currentPart < this._cursor.start) {
+					if (currentPart < anchor) {
 						backwards = true;
-						directLength = this._cursor.start - currentPart;
+						directLength = anchor - currentPart;
 					} else {
 						backwards = false;
-						directLength = currentPart - this._cursor.start + minDivision;
+						directLength = currentPart - anchor + minDivision;
 					}
 					
 					let defaultLength: number = minDivision;
@@ -811,10 +831,10 @@ export class PatternEditor {
 					let start: number;
 					let end: number;
 					if (backwards) {
-						end = this._cursor.start;
+						end = anchor;
 						start = end - defaultLength;
 					} else {
-						start = this._cursor.start;
+						start = anchor;
 						end = start + defaultLength;
 					}
 					const continuesLastPattern: boolean = (start < 0);
