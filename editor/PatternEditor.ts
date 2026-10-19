@@ -27,7 +27,6 @@ class PatternCursor {
 	public abovePitchIndex: number = 0;
 	public curIndex:     number = 0;
 	public curLayer:     number = 0; // Which overlap layer curNote, prevNote, nextNote and curIndex refer to.
-	public coverNote:    Note | null = null; // With overlaps allowed: the top note under the cursor at another pitch.
 	public pointerStart: number = 0; // Where a new note would start before being shifted to fit the bar.
 	public start:        number = 0;
 	public end:          number = 0;
@@ -245,7 +244,7 @@ export class PatternEditor {
 				this._cursor.prevNote = null;
 				this._cursor.nextNote = null;
 			}
-			if (layered && this._cursor.curNote == null && this._cursor.coverNote == null && !this._doc.prefs.allowOverlappingNotes) {
+			if (layered && this._cursor.curNote == null && !this._doc.prefs.allowOverlappingNotes) {
 				// Fit a clicked note into the gap between notes in every layer. With
 				// overlaps allowed it is left at full length and stacks instead.
 				for (const note of this._pattern.allNotes()) {
@@ -396,33 +395,21 @@ export class PatternEditor {
 			}
 		}
 		
-		// A click over another note only joins its chord when the new note would
-		// span exactly the same time; otherwise it is a new note stacked on top,
-		// the same as clicking in empty space.
-		const coverNote: Note | null = this._cursor.coverNote;
-		if (coverNote != null && (coverNote.start != this._cursor.start || coverNote.end != this._cursor.end)) {
-			this._cursor.coverNote = null;
-		}
-		
 		this._cursor.valid = true;
 	}
 	
 	// Picks the overlap layer the cursor acts on: the topmost note under the
 	// cursor at the cursor's pitch. Returns -1 when overlaps are allowed and the
-	// cursor is over other notes but not on one of their pitches, so dragging
-	// there draws a new note on top (coverNote is set for click-to-add-pitch).
+	// cursor is over other notes but not on one of their pitches, so a click or
+	// drag there makes a new note stacked on top, even one of the same length.
 	private _pickCursorLayer(part: number): number {
 		const pattern: Pattern = this._pattern!;
 		const mousePitch: number = this._findMousePitch(this._mouseY);
 		let coverLayer: number = -1;
-		let coverNote: Note | null = null;
 		for (let layer: number = pattern.getLayerCount() - 1; layer >= 0; layer--) {
 			const note: Note | undefined = pattern.getLayer(layer).find(note => note.start <= part && note.end > part);
 			if (note == undefined) continue;
-			if (coverNote == null) {
-				coverLayer = layer;
-				coverNote = note;
-			}
+			if (coverLayer == -1) coverLayer = layer;
 			const interval: number = PatternEditor._noteIntervalAt(note, part);
 			// With overlaps allowed only the note's own row grabs it, so a note can
 			// be drawn on the very next pitch without grabbing the one beside it.
@@ -431,12 +418,8 @@ export class PatternEditor {
 				if (Math.abs(mousePitch - (pitch + interval + 0.5)) < reach) return layer;
 			}
 		}
-		if (coverNote == null) return 0;
-		if (this._doc.prefs.allowOverlappingNotes) {
-			this._cursor.coverNote = coverNote;
-			return -1;
-		}
-		return coverLayer;
+		if (coverLayer == -1) return 0;
+		return this._doc.prefs.allowOverlappingNotes ? -1 : coverLayer;
 	}
 
 	private static _noteIntervalAt(note: Note, part: number): number {
@@ -610,7 +593,7 @@ export class PatternEditor {
 			}
 		} else if (this._cursorIsInSelection()) {
 			this._draggingSelectionContents = true;
-		} else if (this._cursor.valid && this._cursor.curNote == null && this._cursor.coverNote == null && !this._pointers.latest.isTouch) {
+		} else if (this._cursor.valid && this._cursor.curNote == null && !this._pointers.latest.isTouch) {
 			// If clicking in empty space, the result will be adding a note,
 			// so we can safely add it immediately. Note that if clicking on
 			// or near an existing note, the result will depend on whether
@@ -1012,18 +995,6 @@ export class PatternEditor {
 			} else if (this._mouseDragging || !this._dragChange.isNoop()) {
 				this._doc.record(this._dragChange);
 				this._dragChange = null;
-			} else if (this._cursor.curNote == null && this._cursor.coverNote != null) {
-				// Overlaps allowed and clicked over a note at an empty pitch: a click
-				// still adds the pitch to that note's chord; only a drag draws a new note.
-				const coverNote: Note = this._cursor.coverNote;
-				const sequence: ChangeSequence = new ChangeSequence();
-				sequence.append(new ChangePatternSelection(this._doc, 0, 0));
-				if (coverNote.pitches.length == Config.maxChordSize) {
-					sequence.append(new ChangePitchAdded(this._doc, coverNote, coverNote.pitches[0], 0, true));
-				}
-				sequence.append(new ChangePitchAdded(this._doc, coverNote, this._cursor.pitch, coverNote.pitches.length));
-				this._copyPins(coverNote);
-				this._doc.record(sequence);
 			} else if (this._cursor.curNote == null) {
 				if (this._pointers.latest.isTouch) {
 					// If in touch mode, we can't add a new note on press because the
