@@ -31,6 +31,7 @@ import {KeyboardLayout} from "./KeyboardLayout.js";
 import {Piano} from "./Piano.js";
 import {BeatsPerBarPrompt} from "./BeatsPerBarPrompt.js";
 import {MoveNotesSidewaysPrompt} from "./MoveNotesSidewaysPrompt.js";
+import {SwingPrompt} from "./SwingPrompt.js";
 import {SongDurationPrompt} from "./SongDurationPrompt.js";
 import {SustainPrompt} from "./SustainPrompt.js";
 import {ChannelSettingsPrompt} from "./ChannelSettingsPrompt.js";
@@ -250,6 +251,7 @@ export class SongEditor {
 		option({value: "transposeUp"}, "Move Notes Up (+ or ⇧+)"),
 		option({value: "transposeDown"}, "Move Notes Down (- or ⇧-)"),
 		option({value: "moveNotesSideways"}, "Move All Notes Sideways..."),
+		option({value: "applySwing"}, "Apply Swing To Selection..."),
 		option({value: "beatsPerBar"}, "Change Beats Per Bar..."),
 		option({value: "barCount"}, "Change Song Length..."),
 		option({value: "channelSettings"}, "Channel Settings... (Q)"),
@@ -870,6 +872,9 @@ export class SongEditor {
 					break;
 				case "moveNotesSideways":
 					this.prompt = new MoveNotesSidewaysPrompt(this.doc);
+					break;
+				case "applySwing":
+					this.prompt = new SwingPrompt(this.doc);
 					break;
 				case "channelSettings":
 					this.prompt = new ChannelSettingsPrompt(this.doc);
@@ -2345,6 +2350,9 @@ export class SongEditor {
 				break;
 			case "moveNotesSideways":
 				this._openPrompt("moveNotesSideways");
+				break;
+			case "applySwing":
+				this._openPrompt("applySwing");
 				break;
 			case "channelSettings":
 				this._openPrompt("channelSettings");

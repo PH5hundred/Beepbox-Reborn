@@ -4,7 +4,7 @@ import {Dictionary, Config} from "../synth/SynthConfig.js";
 import {Note, Pattern, Channel} from "../synth/synth.js";
 import {SongDocument} from "./SongDocument.js";
 import {ChangeGroup} from "./Change.js";
-import {patternNotesInOrder, ChangeTrackSelection, ChangeChannelBar,ChangeDuplicateSelectedReusedPatterns, ChangeNoteAdded, ChangeNoteTruncate, ChangePatternNumbers, ChangePatternSelection, ChangeInsertBars, ChangeAddChannel, ChangeDeleteBars, ChangeRemoveChannel, ChangeEnsurePatternExists, ChangeNoteLength, ChangePaste, ChangeSetPatternInstruments, ChangeViewInstrument, ChangePatternsPerChannel, ChangePatternRhythm, ChangePatternScale, ChangeTranspose, ChangeChannelOrder, comparePatternNotes, unionOfUsedNotes, generateScaleMap, discardInvalidPatternInstruments, patternsContainSameInstruments} from "./changes.js";
+import {patternNotesInOrder, ChangeTrackSelection, ChangeChannelBar,ChangeDuplicateSelectedReusedPatterns, ChangeNoteAdded, ChangeNoteTruncate, ChangePatternNumbers, ChangePatternSelection, ChangeInsertBars, ChangeAddChannel, ChangeDeleteBars, ChangeRemoveChannel, ChangeEnsurePatternExists, ChangeNoteLength, ChangePaste, ChangeSetPatternInstruments, ChangeViewInstrument, ChangePatternsPerChannel, ChangePatternRhythm, ChangePatternSwing, ChangePatternScale, ChangeTranspose, ChangeChannelOrder, comparePatternNotes, unionOfUsedNotes, generateScaleMap, discardInvalidPatternInstruments, patternsContainSameInstruments} from "./changes.js";
 
 interface PatternCopy {
 	instruments: number[];
@@ -602,7 +602,23 @@ export class Selection {
 				group.append(new ChangePatternRhythm(this._doc, pattern));
 			}
 		}
-		
+
+		this._doc.record(group);
+	}
+
+	public swing(amount: number): void {
+		const group: ChangeGroup = new ChangeGroup();
+
+		if (this.boxSelectionActive) {
+			group.append(new ChangeDuplicateSelectedReusedPatterns(this._doc, this.boxSelectionBar, this.boxSelectionWidth, this.boxSelectionChannel, this.boxSelectionHeight));
+		}
+
+		for (const channelIndex of this._eachSelectedChannel()) {
+			for (const pattern of this._eachSelectedPattern(channelIndex)) {
+				group.append(new ChangePatternSwing(this._doc, pattern, amount));
+			}
+		}
+
 		this._doc.record(group);
 	}
 	

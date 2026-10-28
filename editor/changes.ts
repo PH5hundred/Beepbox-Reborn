@@ -2186,12 +2186,48 @@ export class ChangePatternRhythm extends ChangeSequence {
 class ChangeRhythmNote extends ChangePins {
 	constructor(doc: SongDocument | null, note: Note, changeRhythm: (oldTime:number)=>number) {
 		super(doc, note);
-		
+
 		for (const oldPin of this._oldPins) {
 			this._newPins.push(makeNotePin(oldPin.interval, changeRhythm(oldPin.time + this._oldStart) - this._oldStart, oldPin.size));
 		}
-		
+
 		this._finishSetup();
+	}
+}
+
+// Delays every note that starts on the "off" 8th-note of a beat, so straight
+// eighths (amount 0) can be pushed toward a triplet shuffle feel (amount 1).
+// The same time-remap function is applied to every pin of every note, so a
+// note that ends exactly where a swung note begins stays joined to it - this
+// mirrors how ChangePatternRhythm keeps notes connected across its own remap.
+export class ChangePatternSwing extends ChangeSequence {
+	constructor(doc: SongDocument, pattern: Pattern, amount: number) {
+		super();
+		const beatStraight: number = Config.partsPerBeat / 2;
+		const beatSwung: number = Math.round(Config.partsPerBeat * 2 / 3);
+		const shiftedTime: number = Math.round(beatStraight + (beatSwung - beatStraight) * amount);
+
+		const swingTime: (oldTime:number)=>number = function(oldTime: number): number {
+			const beatStart: number = Math.floor(oldTime / Config.partsPerBeat) * Config.partsPerBeat;
+			const remainder: number = oldTime - beatStart;
+			return (remainder == beatStraight) ? (beatStart + shiftedTime) : oldTime;
+		};
+
+		const hadLayers: boolean = pattern.layers.length > 0;
+		for (let layer: number = 0; layer < pattern.getLayerCount(); layer++) {
+			const layerView: Pattern = layerPattern(pattern, layer);
+			let i: number = 0;
+			while (i < layerView.notes.length) {
+				const note: Note = layerView.notes[i];
+				if (swingTime(note.start) >= swingTime(note.end)) {
+					this.append(new ChangeNoteAdded(doc, layerView, note, i, true));
+				} else {
+					this.append(new ChangeRhythmNote(doc, note, swingTime));
+					i++;
+				}
+			}
+		}
+		if (hadLayers) this.append(new ChangeRelayerPattern(doc, pattern));
 	}
 }
 
